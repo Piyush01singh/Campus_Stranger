@@ -51,6 +51,7 @@ interface AuthenticatedSocket extends Socket {
       signedPreKey: string;
       signedPreKeySignature?: string;
     };
+    authPromise?: Promise<void>;
   };
 }
 
@@ -106,48 +107,53 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: AuthenticatedSocket,
     @MessageBody() payload: { token: string; preKeyBundle?: { identityKey: string; signedPreKey: string; signedPreKeySignature?: string } },
   ) {
-    // Rate limit socket authentication attempts (max 10 attempts per 10 seconds)
-    const rate = await this.redis.checkRateLimit(`ws:auth:${client.id}`, 10, 10);
-    if (!rate.allowed) {
-      client.emit(WsServerEvents.CHAT_ERROR, { code: 'RATE_LIMIT_EXCEEDED', message: 'Authentication rate limit exceeded' });
-      return;
-    }
-
-    try {
-      const decoded = this.jwtService.verify(payload.token);
-      const user = await this.db.findUserById(toUserId(decoded.sub));
-
-      if (!user) {
-        client.emit(WsServerEvents.CHAT_ERROR, { code: 'UNAUTHORIZED', message: 'Invalid session token' });
+    const authPromise = (async () => {
+      // Rate limit socket authentication attempts (max 10 attempts per 10 seconds)
+      const rate = await this.redis.checkRateLimit(`ws:auth:${client.id}`, 10, 10);
+      if (!rate.allowed) {
+        client.emit(WsServerEvents.CHAT_ERROR, { code: 'RATE_LIMIT_EXCEEDED', message: 'Authentication rate limit exceeded' });
         return;
       }
 
-      client.data.user = user;
-      if (payload.preKeyBundle) {
-        client.data.preKeyBundle = payload.preKeyBundle;
+      try {
+        const decoded = this.jwtService.verify(payload.token);
+        const user = await this.db.findUserById(toUserId(decoded.sub));
+
+        if (!user) {
+          client.emit(WsServerEvents.CHAT_ERROR, { code: 'UNAUTHORIZED', message: 'Invalid session token' });
+          return;
+        }
+
+        client.data.user = user;
+        if (payload.preKeyBundle) {
+          client.data.preKeyBundle = payload.preKeyBundle;
+        }
+
+        let sockets = this.userSockets.get(user.id);
+        if (!sockets) {
+          sockets = new Set();
+          this.userSockets.set(user.id, sockets);
+        }
+        sockets.add(client.id);
+
+        // Register presence in Redis for cross-node discovery
+        await this.redis.registerSocket(user.id, client.id);
+
+        client.emit(WsServerEvents.AUTHENTICATED, {
+          userId: user.id,
+          displayName: user.displayName,
+          accountType: user.accountType,
+        });
+
+        this.logger.log(`Authenticated socket ${client.id} for user ${user.displayName} (${user.id})`);
+      } catch (err) {
+        this.logger.warn(`Authentication failed for socket ${client.id}: ${err}`);
+        client.emit(WsServerEvents.CHAT_ERROR, { code: 'UNAUTHORIZED', message: 'Token verification failed' });
       }
+    })();
 
-      let sockets = this.userSockets.get(user.id);
-      if (!sockets) {
-        sockets = new Set();
-        this.userSockets.set(user.id, sockets);
-      }
-      sockets.add(client.id);
-
-      // Register presence in Redis for cross-node discovery
-      await this.redis.registerSocket(user.id, client.id);
-
-      client.emit(WsServerEvents.AUTHENTICATED, {
-        userId: user.id,
-        displayName: user.displayName,
-        accountType: user.accountType,
-      });
-
-      this.logger.log(`Authenticated socket ${client.id} for user ${user.displayName} (${user.id})`);
-    } catch (err) {
-      this.logger.warn(`Authentication failed for socket ${client.id}: ${err}`);
-      client.emit(WsServerEvents.CHAT_ERROR, { code: 'UNAUTHORIZED', message: 'Token verification failed' });
-    }
+    client.data.authPromise = authPromise;
+    await authPromise;
   }
 
   // --- 2. Matchmaking Queue ---
@@ -157,6 +163,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     @ConnectedSocket() client: AuthenticatedSocket,
     @MessageBody() payload?: { preKeyBundle?: { identityKey: string; signedPreKey: string; signedPreKeySignature?: string } },
   ) {
+    if (!client.data.user && client.data.authPromise) {
+      await client.data.authPromise;
+    }
+
     const user = client.data.user;
     if (!user) {
       client.emit(WsServerEvents.CHAT_ERROR, { code: 'UNAUTHORIZED', message: 'Must authenticate before joining matchmaking' });

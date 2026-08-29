@@ -19,8 +19,11 @@ import {
 import { apiClient } from './api-client';
 import { cryptoManager } from './crypto-manager';
 
-const SOCKET_URL =
-  process.env.NEXT_PUBLIC_WS_URL || process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+const rawWsUrl =
+  process.env.NEXT_PUBLIC_WS_URL ||
+  process.env.NEXT_PUBLIC_API_URL?.replace(/\/+$/, '').replace(/\/api$/, '') ||
+  'http://localhost:3001';
+const SOCKET_URL = rawWsUrl.replace(/\/+$/, '');
 
 export type MatchFoundCallback = (match: IWsMatchFoundPayload) => void;
 export type MessageReceivedCallback = (msg: {
@@ -34,7 +37,8 @@ export type ChatEndedCallback = (reason: string) => void;
 
 class SocketClient {
   private socket: Socket | null = null;
-  private isConnecting = false;
+  private isAuthenticated = false;
+  private authPromise: Promise<Socket> | null = null;
 
   private onMatchFoundListeners: Set<MatchFoundCallback> = new Set();
   private onMessageReceivedListeners: Set<MessageReceivedCallback> = new Set();
@@ -44,44 +48,90 @@ class SocketClient {
   private onChatEndedListeners: Set<ChatEndedCallback> = new Set();
 
   connect(): Promise<Socket> {
-    if (this.socket && this.socket.connected) {
+    if (this.socket && this.socket.connected && this.isAuthenticated) {
       return Promise.resolve(this.socket);
     }
 
-    if (this.isConnecting && this.socket) {
-      return new Promise((resolve) => {
-        this.socket!.once('connect', () => resolve(this.socket!));
-      });
+    if (this.authPromise) {
+      return this.authPromise;
     }
 
-    this.isConnecting = true;
     const token = apiClient.getToken();
 
-    this.socket = io(SOCKET_URL, {
-      transports: ['websocket', 'polling'],
-      autoConnect: true,
-      reconnection: true,
-      reconnectionAttempts: 10,
-      reconnectionDelay: 1000,
-    });
-
-    return new Promise((resolve, _reject) => {
-      this.socket!.on('connect', async () => {
-        this.isConnecting = false;
-        if (token) {
-          const preKeyBundle = await cryptoManager.getPreKeyBundle();
-          this.socket!.emit(WsClientEvents.AUTHENTICATE, { token, preKeyBundle });
-        }
-        resolve(this.socket!);
-      });
-
-      this.socket!.on('connect_error', (err) => {
-        this.isConnecting = false;
-        console.warn('Socket connect error:', err);
+    if (!this.socket) {
+      this.socket = io(SOCKET_URL, {
+        transports: ['websocket', 'polling'],
+        autoConnect: true,
+        reconnection: true,
+        reconnectionAttempts: 10,
+        reconnectionDelay: 1000,
       });
 
       this.registerEventHandlers();
+
+      this.socket.on('disconnect', () => {
+        this.isAuthenticated = false;
+      });
+
+      this.socket.on('connect_error', (err) => {
+        console.warn('Socket connect error:', err);
+      });
+    } else if (!this.socket.connected) {
+      this.socket.connect();
+    }
+
+    this.authPromise = new Promise<Socket>((resolve) => {
+      let isResolved = false;
+
+      const finish = (sock: Socket) => {
+        if (!isResolved) {
+          isResolved = true;
+          this.authPromise = null;
+          resolve(sock);
+        }
+      };
+
+      const timer = setTimeout(() => {
+        finish(this.socket!);
+      }, 8000);
+
+      this.socket!.once(WsServerEvents.AUTHENTICATED, () => {
+        clearTimeout(timer);
+        this.isAuthenticated = true;
+        finish(this.socket!);
+      });
+
+      this.socket!.once(WsServerEvents.CHAT_ERROR, (err) => {
+        if (err?.code === 'UNAUTHORIZED') {
+          clearTimeout(timer);
+          finish(this.socket!);
+        }
+      });
+
+      const sendAuth = async () => {
+        const currentToken = apiClient.getToken() || token;
+        if (currentToken) {
+          try {
+            const preKeyBundle = await cryptoManager.getPreKeyBundle();
+            this.socket!.emit(WsClientEvents.AUTHENTICATE, { token: currentToken, preKeyBundle });
+          } catch (err) {
+            console.error('Failed to generate preKeyBundle on socket connect:', err);
+            this.socket!.emit(WsClientEvents.AUTHENTICATE, { token: currentToken });
+          }
+        } else {
+          clearTimeout(timer);
+          finish(this.socket!);
+        }
+      };
+
+      if (this.socket!.connected) {
+        sendAuth();
+      } else {
+        this.socket!.once('connect', sendAuth);
+      }
     });
+
+    return this.authPromise;
   }
 
   private registerEventHandlers() {

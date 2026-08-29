@@ -19,4 +19,21 @@ describe('apps/web workspace, packages, and theme utilities', () => {
     expect(validThemes).toContain('dark');
     expect(validThemes).toHaveLength(2);
   });
+
+  it('should correctly normalize API and WebSocket base URLs with or without /api suffix', () => {
+    const normalizeApiBase = (url: string) => url.replace(/\/+$/, '').replace(/\/api$/, '');
+    const normalizeWsUrl = (wsUrl?: string, apiUrl?: string) =>
+      (wsUrl || apiUrl?.replace(/\/+$/, '').replace(/\/api$/, '') || 'http://localhost:3001').replace(/\/+$/, '');
+
+    // Test with /api suffix (as provided in production config)
+    expect(normalizeApiBase('https://campus-stranger.onrender.com/api')).toBe('https://campus-stranger.onrender.com');
+    expect(normalizeWsUrl(undefined, 'https://campus-stranger.onrender.com/api')).toBe('https://campus-stranger.onrender.com');
+
+    // Test with trailing slash
+    expect(normalizeApiBase('https://campus-stranger.onrender.com/')).toBe('https://campus-stranger.onrender.com');
+    expect(normalizeWsUrl(undefined, 'https://campus-stranger.onrender.com/')).toBe('https://campus-stranger.onrender.com');
+
+    // Test with dedicated WebSocket URL
+    expect(normalizeWsUrl('https://campus-stranger.onrender.com', 'https://campus-stranger.onrender.com/api')).toBe('https://campus-stranger.onrender.com');
+  });
 });

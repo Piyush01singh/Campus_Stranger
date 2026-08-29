@@ -71,20 +71,29 @@ The target hosting architecture is **LOCKED**:
 
 ### B. Frontend: Vercel
 
-* **Framework Preset**: Next.js
-* **Root Directory**: `./` (or `apps/web`)
+* **Framework Preset**: `Next.js`
+* **Root Directory**: `apps/web` (with "Include source files outside of the Root Directory" enabled by default on Vercel) or repository root `.`
 * **Build Command**: `pnpm --filter @campus-stranger/web build`
-* **Output Directory**: `apps/web/.next`
+* **Install Command**: `pnpm install`
+* **Output Directory**: `.next` (or `apps/web/.next` if root directory is `.`)
+* **Node.js Version**: `20.x` or `22.x`
 
 #### Required Environment Variables on Vercel:
 
 | Variable | Required | Scope | Example / Description |
 |---|:---:|:---:|---|
-| `NEXT_PUBLIC_API_URL` | Yes | Public / Client | `https://<render-service-subdomain>.onrender.com` (Base URL for API & WebSocket) |
-| `NEXT_PUBLIC_WS_URL` | Optional | Public / Client | `https://<render-service-subdomain>.onrender.com` (Dedicated WebSocket origin if separate) |
+| `NEXT_PUBLIC_API_URL` | Yes | Public / Client | `https://campus-stranger.onrender.com/api` (or `https://campus-stranger.onrender.com`) |
+| `NEXT_PUBLIC_WS_URL` | Optional | Public / Client | `https://campus-stranger.onrender.com` (WebSocket host; defaults to API origin) |
 
 > [!CAUTION]
 > **Client-Side Secret Isolation**: Variables prefixed with `NEXT_PUBLIC_` are exposed in browser bundles. Never prefix `DATABASE_URL`, `REDIS_URL`, `SESSION_SECRET`, or `GOOGLE_CLIENT_SECRET` with `NEXT_PUBLIC_`.
+
+#### Post-Vercel Deployment Step:
+Once the Vercel project is created and assigned a production domain (e.g. `https://campus-stranger.vercel.app` or a custom domain):
+1. Navigate to the **Render Dashboard** -> Web Service -> **Environment**.
+2. Update `CORS_ORIGIN` to `https://campus-stranger.vercel.app` (or comma-separated allowed origins).
+3. Update `FRONTEND_URL` to `https://campus-stranger.vercel.app`.
+4. Trigger a service restart on Render to apply the updated origin whitelist.
 
 ---
 

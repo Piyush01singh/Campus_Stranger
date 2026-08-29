@@ -5,7 +5,8 @@ import {
   IUser,
 } from '@campus-stranger/shared-types';
 
-const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+const rawApiUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:3001';
+const API_BASE = rawApiUrl.replace(/\/+$/, '').replace(/\/api$/, '');
 
 export interface ISavedStrangerView {
   conversationId: string;
