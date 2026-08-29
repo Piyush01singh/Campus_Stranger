@@ -1,0 +1,46 @@
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# Version control
+.git
+.gitignore
+.github
+
+# Dependencies & build caches
+node_modules
+.pnpm-store
+.turbo
+.next
+dist
+build
+out
+*.tsbuildinfo
+.eslintcache
+
+# Tests & Coverage
+coverage
+*.lcov
+test
+tests
+*.spec.ts
+*.test.ts
+
+# Documentation & Specifications
+*.md
+!packages/**/package.json
+!apps/**/package.json
+
+# Local infrastructure & logs
+logs
+*.log
+.postgres-data
+.redis-data
+.neon
+
+# OS & IDE files
+.DS_Store
+Thumbs.db
+.vscode
+.idea

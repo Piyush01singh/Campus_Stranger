@@ -1,0 +1,194 @@
+'use client';
+
+import React, { useState, useEffect } from 'react';
+import { useRouter } from 'next/navigation';
+import { User, ArrowRight, Lock, EyeOff, Users } from 'lucide-react';
+import { Navbar } from '../components/Navbar';
+import { SaveStrangerModal } from '../components/SaveStrangerModal';
+import { apiClient } from '../lib/api-client';
+import { IUser } from '@campus-stranger/shared-types';
+
+export default function HomePage() {
+  const router = useRouter();
+  const [nickname, setNickname] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [currentUser, setCurrentUser] = useState<IUser | null>(null);
+  const [authModalOpen, setAuthModalOpen] = useState(false);
+
+  useEffect(() => {
+    apiClient.getMe().then((u) => setCurrentUser(u));
+  }, []);
+
+  const handleStartChat = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      if (!currentUser) {
+        const guest = await apiClient.createGuest(nickname.trim() || undefined);
+        setCurrentUser(guest.user);
+      }
+      router.push(`/chat${nickname ? `?nickname=${encodeURIComponent(nickname.trim())}` : ''}`);
+    } catch (err) {
+      console.error('Failed to initiate guest chat:', err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="min-h-screen flex flex-col justify-between bg-background text-foreground transition-colors selection:bg-coral-light selection:text-coral-dark overflow-x-hidden">
+      {/* 1. Header Navigation */}
+      <Navbar user={currentUser} onOpenAuthModal={() => setAuthModalOpen(true)} />
+
+      {/* 2. Hero & Central Presentation */}
+      <main className="flex-1 flex flex-col items-center justify-center px-4 py-6 sm:py-8 max-w-4xl mx-auto w-full">
+        {/* Hero Typography Group */}
+        <div className="relative text-center mb-5 sm:mb-7 select-none">
+          {/* Handwritten Annotation + Hand-drawn Arrow */}
+          <div className="absolute -top-12 -left-4 sm:-top-14 sm:-left-20 lg:-top-16 lg:-left-26 -rotate-6 flex flex-col items-end pointer-events-none z-10">
+            <div className="font-handwriting text-lg sm:text-xl lg:text-2xl text-neutral-700 dark:text-neutral-300 font-bold leading-[1.08] text-left">
+              <span>Same</span>
+              <br />
+              <span>Campus.</span>
+              <br />
+              <span>New People.</span>
+            </div>
+
+            {/* Hand-drawn Curving Arrow */}
+            <svg
+              className="w-10 h-7 sm:w-12 sm:h-8 text-neutral-700 dark:text-neutral-300 mt-1 mr-1"
+              viewBox="0 0 54 36"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2.2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M 6 4 C 18 16, 32 24, 48 26" />
+              <path d="M 36 18 L 49 27 L 38 33" />
+            </svg>
+          </div>
+
+          {/* Primary Headline: "Meet" */}
+          <h1 className="text-[52px] sm:text-6xl md:text-[72px] lg:text-[78px] font-black text-neutral-900 dark:text-neutral-50 tracking-[-0.035em] leading-[0.98]">
+            Meet
+          </h1>
+
+          {/* Accent Headline: "Real People." + Underline */}
+          <div className="relative inline-block mt-0.5 sm:mt-1">
+            <h2 className="text-[52px] sm:text-6xl md:text-[72px] lg:text-[78px] font-black text-coral tracking-[-0.035em] leading-[0.98]">
+              Real People.
+            </h2>
+
+            {/* Hand-drawn Accent Underline */}
+            <svg
+              className="absolute -bottom-2.5 sm:-bottom-3.5 left-0 w-full h-3 sm:h-4 text-coral pointer-events-none"
+              viewBox="0 0 300 18"
+              fill="none"
+              preserveAspectRatio="none"
+            >
+              <path
+                d="M 4 9 C 60 15, 170 15, 296 7 C 220 13, 110 13, 4 9 Z"
+                fill="currentColor"
+              />
+              <path
+                d="M 12 11 C 85 15, 210 15, 288 10"
+                stroke="currentColor"
+                strokeWidth="2.2"
+                strokeLinecap="round"
+              />
+            </svg>
+          </div>
+        </div>
+
+        {/* 3. Hero Nickname Pill Input */}
+        <form
+          onSubmit={handleStartChat}
+          className="w-full max-w-[470px] h-14 sm:h-16 rounded-full bg-white dark:bg-neutral-900 border border-[#e5e3de] dark:border-neutral-800 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] dark:shadow-none flex items-center px-4 sm:px-5 gap-3 transition-all focus-within:ring-2 focus-within:ring-coral/40 focus-within:border-coral"
+        >
+          <User className="w-5 h-5 text-neutral-400 dark:text-neutral-500 shrink-0 ml-0.5" strokeWidth={1.75} />
+
+          <input
+            id="nickname-input"
+            type="text"
+            value={nickname}
+            onChange={(e) => setNickname(e.target.value)}
+            placeholder="Pick a nickname"
+            maxLength={24}
+            disabled={loading}
+            className="flex-1 bg-transparent border-none outline-none text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 dark:placeholder:text-neutral-500 text-sm sm:text-base font-normal min-w-0"
+          />
+
+          <button
+            type="submit"
+            disabled={loading}
+            aria-label="Start Anonymous Chat"
+            className="w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-coral hover:bg-coral-hover active:scale-95 text-white flex items-center justify-center shadow-md shadow-coral/25 transition-all shrink-0 disabled:opacity-50"
+          >
+            <ArrowRight className="w-4 h-4 sm:w-5 sm:h-5 stroke-[2.5]" />
+          </button>
+        </form>
+
+        {/* 4. Sub-descriptor Text */}
+        <p className="text-[10px] sm:text-[11px] font-semibold tracking-[0.25em] text-neutral-500 dark:text-neutral-400 uppercase mt-3.5 mb-8 sm:mb-10 select-none text-center">
+          ANONYMOUS &nbsp;•&nbsp; ENCRYPTED &nbsp;•&nbsp; JUST CHAT
+        </p>
+
+        {/* 5. Three Minimalist Feature Blocks (Cohesive Group) */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 sm:gap-8 md:gap-10 w-full max-w-lg mx-auto text-center select-none">
+          {/* Feature 1: Sage green circle */}
+          <div className="flex flex-col items-center">
+            <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-[#e2f2e6] dark:bg-[#162e22] flex items-center justify-center text-[#225835] dark:text-[#86efac] mb-2 shadow-xs">
+              <Lock className="w-4 h-4 sm:w-5 sm:h-5" strokeWidth={1.5} />
+            </div>
+            <div className="space-y-0.5">
+              <p className="font-semibold text-xs sm:text-[13px] text-neutral-800 dark:text-neutral-200 leading-snug">
+                Your chats.
+              </p>
+              <p className="font-semibold text-xs sm:text-[13px] text-neutral-800 dark:text-neutral-200 leading-snug">
+                Only yours.
+              </p>
+            </div>
+          </div>
+
+          {/* Feature 2: Blush coral circle */}
+          <div className="flex flex-col items-center">
+            <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-[#fde8e3] dark:bg-[#341c19] flex items-center justify-center text-[#7e3125] dark:text-[#fca5a5] mb-2 shadow-xs">
+              <EyeOff className="w-4 h-4 sm:w-5 sm:h-5" strokeWidth={1.5} />
+            </div>
+            <div className="space-y-0.5">
+              <p className="font-semibold text-xs sm:text-[13px] text-neutral-800 dark:text-neutral-200 leading-snug">
+                No plaintext.
+              </p>
+              <p className="font-semibold text-xs sm:text-[13px] text-neutral-800 dark:text-neutral-200 leading-snug">
+                Anywhere.
+              </p>
+            </div>
+          </div>
+
+          {/* Feature 3: Warm buttercup circle */}
+          <div className="flex flex-col items-center">
+            <div className="w-11 h-11 sm:w-12 sm:h-12 rounded-full bg-[#fbf0d9] dark:bg-[#312716] flex items-center justify-center text-[#664d1a] dark:text-[#fde047] mb-2 shadow-xs">
+              <Users className="w-4 h-4 sm:w-5 sm:h-5" strokeWidth={1.5} />
+            </div>
+            <div className="space-y-0.5">
+              <p className="font-semibold text-xs sm:text-[13px] text-neutral-800 dark:text-neutral-200 leading-snug">
+                Meet.
+              </p>
+              <p className="font-semibold text-xs sm:text-[13px] text-neutral-800 dark:text-neutral-200 leading-snug">
+                Move on. Or stay.
+              </p>
+            </div>
+          </div>
+        </div>
+      </main>
+
+      {/* 6. Save Stranger / Auth Modal */}
+      <SaveStrangerModal
+        isOpen={authModalOpen}
+        onClose={() => setAuthModalOpen(false)}
+        onSuccess={(u) => setCurrentUser(u)}
+      />
+    </div>
+  );
+}

@@ -1,0 +1,11 @@
+node_modules
+dist
+build
+.next
+.turbo
+coverage
+.postgres-data
+.redis-data
+pnpm-lock.yaml
+SPEC.md
+AGENT_STATUS.md

@@ -1,0 +1,99 @@
+@import url('https://fonts.googleapis.com/css2?family=Caveat:wght@600;700&family=Kalam:wght@700&family=Patrick+Hand&family=Plus+Jakarta+Sans:ital,wght@0,400;0,500;0,600;0,700;0,800;1,600;1,700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 40 25% 97.5%; /* #faf8f5 warm off-white cream */
+    --foreground: 240 10% 9%; /* #18181b deep charcoal text */
+    --card: 0 0% 100%;
+    --card-foreground: 240 10% 9%;
+    --primary: 9 86% 56%; /* #ef4a30 warm coral/orange */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 40 15% 94%;
+    --secondary-foreground: 240 10% 15%;
+    --muted: 40 10% 94%;
+    --muted-foreground: 220 9% 46%; /* #6b7280 */
+    --accent: 15 40% 95%;
+    --accent-foreground: 9 86% 40%;
+    --destructive: 0 84% 60%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 40 12% 89%; /* #e5e3de */
+    --input: 40 12% 89%;
+    --ring: 9 86% 56%;
+    --radius: 1rem;
+    --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    --font-handwriting: 'Caveat', 'Patrick Hand', cursive;
+    --font-script: 'Kalam', 'Caveat', cursive;
+  }
+
+  .dark {
+    --background: 240 6% 8%; /* #121214 deep warm charcoal */
+    --foreground: 240 5% 96%; /* #f4f4f6 warm off-white */
+    --card: 240 5% 12%; /* #1c1c20 */
+    --card-foreground: 240 5% 96%;
+    --primary: 9 88% 59%; /* #f05a40 luminous warm coral */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 240 4% 16%;
+    --secondary-foreground: 240 5% 90%;
+    --muted: 240 4% 16%;
+    --muted-foreground: 240 4% 65%;
+    --accent: 15 25% 18%;
+    --accent-foreground: 9 88% 70%;
+    --destructive: 0 62% 30%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 240 4% 20%;
+    --input: 240 4% 20%;
+    --ring: 9 88% 59%;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  color: hsl(var(--foreground));
+  background-color: hsl(var(--background));
+  font-family: var(--font-sans);
+  min-height: 100vh;
+  transition: background-color 0.2s ease, color 0.2s ease;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom handwritten text utility */
+.font-handwriting {
+  font-family: var(--font-handwriting), 'Caveat', cursive;
+}
+
+.font-script {
+  font-family: var(--font-script), 'Kalam', cursive;
+}
+
+/* Accent Underline Hand-drawn Style */
+.hand-drawn-underline {
+  position: relative;
+  display: inline-block;
+}
+
+/* Custom smooth scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground));
+}
