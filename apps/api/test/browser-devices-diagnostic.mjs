@@ -6,14 +6,15 @@ async function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-// Simulates the exact browser SocketClient class with the updated lifecycle
-class BrowserSocketClientSimulator {
+class BrowserDeviceSimulator {
   constructor(name, token) {
     this.name = name;
     this.token = token;
     this.socket = null;
     this.isAuthenticated = false;
     this.authPromise = null;
+    this.matchFoundCallback = null;
+    this.messageReceivedCallback = null;
   }
 
   connect() {
@@ -30,55 +31,61 @@ class BrowserSocketClientSimulator {
         transports: ['websocket', 'polling'],
         autoConnect: true,
         reconnection: true,
-        reconnectionAttempts: 10,
+        reconnectionAttempts: 5,
         reconnectionDelay: 1000,
       });
 
-      this.socket.on('disconnect', () => {
+      this.socket.on('connect', () => {
+        console.log(`[${this.name}] Socket connected. ID: ${this.socket.id}, Transport: ${this.socket.io.engine.transport.name}`);
+      });
+
+      this.socket.on('disconnect', (reason, description) => {
         this.isAuthenticated = false;
-        console.log(`[${this.name}] Socket disconnected.`);
+        console.log(`[${this.name}] Socket disconnected. Reason: ${reason}, Description: ${JSON.stringify(description)}`);
       });
 
       this.socket.on('connect_error', (err) => {
-        console.warn(`[${this.name}] Socket connect error:`, err.message);
+        console.warn(`[${this.name}] Connect error:`, err.message);
+      });
+
+      this.socket.on('chat:error', (err) => {
+        console.error(`[${this.name}] 🔴 Server Error:`, JSON.stringify(err));
+      });
+
+      this.socket.on('match:found', (payload) => {
+        console.log(`[${this.name}] 🟢 Received 'match:found'! Partner: ${payload.partnerDisplayName}, ConvId: ${payload.conversationId}`);
+        if (this.matchFoundCallback) this.matchFoundCallback(payload);
+      });
+
+      this.socket.on('chat:message', (payload) => {
+        console.log(`[${this.name}] 🟢 Received 'chat:message': ID=${payload.envelope.id}`);
+        if (this.messageReceivedCallback) this.messageReceivedCallback(payload);
       });
     } else if (!this.socket.connected) {
       this.socket.connect();
     }
 
-    this.authPromise = new Promise((resolve) => {
-      let isResolved = false;
-
-      const finish = (sock) => {
-        if (!isResolved) {
-          isResolved = true;
-          this.authPromise = null;
-          resolve(sock);
-        }
-      };
-
+    this.authPromise = new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
-        console.warn(`[${this.name}] Auth timeout fallback triggered.`);
-        finish(this.socket);
-      }, 8000);
+        reject(new Error(`[${this.name}] Authentication timed out`));
+      }, 10000);
 
       this.socket.once('authenticated', (user) => {
         clearTimeout(timer);
         this.isAuthenticated = true;
         console.log(`[${this.name}] 🟢 Authenticated on server as: ${user.displayName} (${user.userId})`);
-        finish(this.socket);
+        resolve(this.socket);
       });
 
       this.socket.once('chat:error', (err) => {
         if (err?.code === 'UNAUTHORIZED') {
-          console.error(`[${this.name}] 🔴 Server unauthorized error:`, err.message);
           clearTimeout(timer);
-          finish(this.socket);
+          reject(new Error(`[${this.name}] Unauthorized error: ${err.message}`));
         }
       });
 
-      const sendAuth = async () => {
-        console.log(`[${this.name}] Socket connected, sending authenticate event...`);
+      const sendAuth = () => {
+        console.log(`[${this.name}] Emitting authenticate event...`);
         this.socket.emit('authenticate', {
           token: this.token,
           preKeyBundle: { identityKey: `idKey_${this.name}`, signedPreKey: `preKey_${this.name}` },
@@ -97,16 +104,61 @@ class BrowserSocketClientSimulator {
 
   async joinMatchmaking() {
     await this.connect();
-    console.log(`[${this.name}] Emitting match:join to server...`);
+    console.log(`[${this.name}] Emitting match:join...`);
     this.socket.emit('match:join', {
       preKeyBundle: { identityKey: `idKey_${this.name}`, signedPreKey: `preKey_${this.name}` },
     });
+  }
+
+  waitForMatch(timeoutMs = 12000) {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`[${this.name}] Match timeout (${timeoutMs}ms)`)), timeoutMs);
+      this.matchFoundCallback = (payload) => {
+        clearTimeout(timer);
+        resolve(payload);
+      };
+    });
+  }
+
+  waitForMessage(timeoutMs = 10000) {
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error(`[${this.name}] Message receive timeout (${timeoutMs}ms)`)), timeoutMs);
+      this.messageReceivedCallback = (payload) => {
+        clearTimeout(timer);
+        resolve(payload);
+      };
+    });
+  }
+
+  sendEncryptedMessage(conversationId, ciphertext) {
+    const payload = {
+      clientMessageId: `cmsg_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
+      conversationId,
+      encryptedPayload: {
+        ciphertext,
+        iv: `iv_${this.name}`,
+        tag: `tag_${this.name}`,
+        ephemPublicKey: `ephem_${this.name}`,
+        protocolVersion: 1,
+        keyId: `step_${this.name}`,
+      },
+    };
+    this.socket.emit('chat:send', payload);
+    return payload;
+  }
+
+  disconnect() {
+    this.socket?.disconnect();
+    this.socket = null;
+    this.isAuthenticated = false;
+    this.authPromise = null;
   }
 }
 
 async function runDeviceDiagnostic() {
   console.log('================================================================');
   console.log('  CampusStranger Multi-Device Matchmaking Production Diagnostic ');
+  console.log(`  Target: ${API_BASE}`);
   console.log('================================================================\n');
 
   // 1. Device 1 (Laptop) - Create Guest
@@ -116,8 +168,9 @@ async function runDeviceDiagnostic() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ displayName: 'Alice_Laptop' }),
   });
+  if (!res1.ok) throw new Error(`Laptop guest creation failed: ${res1.status}`);
   const data1 = (await res1.json()).data;
-  console.log(`[Laptop] Guest session created: User=${data1.user.displayName}, ID=${data1.user.id}`);
+  console.log(`[Laptop] Guest created: User=${data1.user.displayName}, ID=${data1.user.id}`);
 
   // 2. Device 2 (Phone) - Create Guest
   console.log('\n--- Step 2: Device 2 (Phone) HTTP Guest Creation ---');
@@ -126,114 +179,56 @@ async function runDeviceDiagnostic() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ displayName: 'Bob_Phone' }),
   });
+  if (!res2.ok) throw new Error(`Phone guest creation failed: ${res2.status}`);
   const data2 = (await res2.json()).data;
-  console.log(`[Phone] Guest session created: User=${data2.user.displayName}, ID=${data2.user.id}`);
+  console.log(`[Phone] Guest created: User=${data2.user.displayName}, ID=${data2.user.id}`);
 
-  // 3. Instantiate browser socket client simulators
-  const laptopClient = new BrowserSocketClientSimulator('Laptop_Client', data1.accessToken);
-  const phoneClient = new BrowserSocketClientSimulator('Phone_Client', data2.accessToken);
+  // 3. Instantiate simulators
+  const laptop = new BrowserDeviceSimulator('Laptop_Alice', data1.accessToken);
+  const phone = new BrowserDeviceSimulator('Phone_Bob', data2.accessToken);
+
+  // Setup match promises
+  const laptopMatchPromise = laptop.waitForMatch();
+  const phoneMatchPromise = phone.waitForMatch();
 
   // 4. Laptop enters matchmaking
-  console.log('\n--- Step 3: Laptop joins matchmaking ---');
-  let matchLaptop = null;
-  const matchLaptopPromise = new Promise((resolve) => {
-    laptopClient.socket?.on('match:found', resolve);
-  });
+  console.log('\n--- Step 3: Laptop connects and joins matchmaking ---');
+  await laptop.joinMatchmaking();
 
-  await laptopClient.joinMatchmaking();
-
-  // Wait 1 second (simulating real device delay before second user starts searching)
-  console.log('Waiting 1s before Phone user starts matchmaking...');
+  console.log('Waiting 1000ms before Phone user joins matchmaking...');
   await sleep(1000);
 
   // 5. Phone enters matchmaking
-  console.log('\n--- Step 4: Phone joins matchmaking ---');
-  let matchPhone = null;
+  console.log('\n--- Step 4: Phone connects and joins matchmaking ---');
+  await phone.joinMatchmaking();
 
-  const matchLaptopPromiseActual = new Promise((resolve) => {
-    laptopClient.socket.once('match:found', (payload) => {
-      matchLaptop = payload;
-      resolve(payload);
-    });
-  });
-
-  const matchPhonePromiseActual = new Promise((resolve) => {
-    phoneClient.socket = io(API_BASE, { transports: ['websocket', 'polling'] });
-    phoneClient.socket.once('match:found', (payload) => {
-      matchPhone = payload;
-      resolve(payload);
-    });
-  });
-
-  // Attach error watchers
-  laptopClient.socket.on('chat:error', (err) => console.error('[Laptop Error]', err));
-  phoneClient.socket.on('chat:error', (err) => console.error('[Phone Error]', err));
-
-  await phoneClient.joinMatchmaking();
-
+  // 6. Await matches on both devices
   console.log('\n--- Step 5: Awaiting Matchmaking Resolution ---');
-  await Promise.all([matchLaptopPromiseActual, matchPhonePromiseActual]);
+  const [matchLaptop, matchPhone] = await Promise.all([laptopMatchPromise, phoneMatchPromise]);
 
-  console.log('🎉 MATCH SUCCESSFUL!');
+  console.log('\n🎉 MATCH SUCCESSFUL!');
   console.log(`[Laptop] Matched with: ${matchLaptop.partnerDisplayName}, ConvId: ${matchLaptop.conversationId}`);
   console.log(`[Phone]  Matched with: ${matchPhone.partnerDisplayName}, ConvId: ${matchPhone.conversationId}`);
 
   if (matchLaptop.conversationId !== matchPhone.conversationId) {
-    throw new Error('Conversation IDs mismatch between Laptop and Phone');
+    throw new Error(`Conversation ID mismatch: Laptop=${matchLaptop.conversationId}, Phone=${matchPhone.conversationId}`);
   }
 
-  // 6. E2EE Bidirectional Message Exchange
-  console.log('\n--- Step 6: Bidirectional E2EE Ciphertext Exchange ---');
-  const mockEnvelopeA = {
-    ciphertext: 'QWxpY2VfTGFwdG9wX0VuY3J5cHRlZF9NZXNzYWdl',
-    iv: 'aXZfbGFwdG9wXzk2',
-    tag: 'dGFnX2xhcHRvcA==',
-    ephemPublicKey: 'ZXBoZW1fa2V5X2xhcHRvcA==',
-    protocolVersion: 1,
-    keyId: 'step_1',
-  };
+  // 7. Bidirectional E2EE Messaging
+  console.log('\n--- Step 6: Bidirectional E2EE Message Exchange ---');
+  const phoneMsgPromise = phone.waitForMessage();
+  laptop.sendEncryptedMessage(matchLaptop.conversationId, 'HelloFromLaptopAlice_E2EE');
+  const phoneReceived = await phoneMsgPromise;
+  console.log(`[Phone] Received: ${phoneReceived.envelope.encryptedPayload.ciphertext}`);
 
-  const phoneReceivedPromise = new Promise((resolve) => {
-    phoneClient.socket.once('chat:message', resolve);
-  });
-
-  laptopClient.socket.emit('chat:send', {
-    clientMessageId: `cmsg_${Date.now()}`,
-    conversationId: matchLaptop.conversationId,
-    encryptedPayload: mockEnvelopeA,
-  });
-
-  const phoneReceived = await phoneReceivedPromise;
-  console.log(`[Phone]  Received encrypted message from Laptop: ID=${phoneReceived.envelope.id}`);
-  console.log(`[Phone]  Ciphertext match: ${phoneReceived.envelope.encryptedPayload.ciphertext === mockEnvelopeA.ciphertext}`);
-
-  // Phone replies back to Laptop
-  const mockEnvelopeB = {
-    ciphertext: 'Qm9iX1Bob25lX0VuY3J5cHRlZF9SZXBseQ==',
-    iv: 'aXZfcGhvbmVfOTY=',
-    tag: 'dGFnX3Bob25l',
-    ephemPublicKey: 'ZXBoZW1fa2V5X3Bob25l',
-    protocolVersion: 1,
-    keyId: 'step_2',
-  };
-
-  const laptopReceivedPromise = new Promise((resolve) => {
-    laptopClient.socket.once('chat:message', resolve);
-  });
-
-  phoneClient.socket.emit('chat:send', {
-    clientMessageId: `cmsg_reply_${Date.now()}`,
-    conversationId: matchPhone.conversationId,
-    encryptedPayload: mockEnvelopeB,
-  });
-
-  const laptopReceived = await laptopReceivedPromise;
-  console.log(`[Laptop] Received encrypted reply from Phone: ID=${laptopReceived.envelope.id}`);
-  console.log(`[Laptop] Ciphertext match: ${laptopReceived.envelope.encryptedPayload.ciphertext === mockEnvelopeB.ciphertext}`);
+  const laptopMsgPromise = laptop.waitForMessage();
+  phone.sendEncryptedMessage(matchPhone.conversationId, 'HelloFromPhoneBob_E2EE_Reply');
+  const laptopReceived = await laptopMsgPromise;
+  console.log(`[Laptop] Received: ${laptopReceived.envelope.encryptedPayload.ciphertext}`);
 
   // Cleanup
-  laptopClient.socket.disconnect();
-  phoneClient.socket.disconnect();
+  laptop.disconnect();
+  phone.disconnect();
 
   console.log('\n================================================================');
   console.log('✅ ALL DIAGNOSTIC CHECKS PASSED: LAPTOP & PHONE MATCHED CLEANLY');

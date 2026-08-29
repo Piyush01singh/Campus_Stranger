@@ -48,13 +48,6 @@ export class MatchmakingService {
         continue;
       }
 
-      // Verify peer is still connected and online in Redis presence
-      const isOnline = await this.redis.isUserOnline(peer.userId);
-      if (!isOnline) {
-        await this.redis.removeMatchCandidate(peer.userId);
-        continue;
-      }
-
       // Check block list in both directions via PostgreSQL
       const isBlocked = await this.db.isBlocked(candidate.userId, peer.userId);
       if (isBlocked) {
