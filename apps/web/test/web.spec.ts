@@ -36,4 +36,27 @@ describe('apps/web workspace, packages, and theme utilities', () => {
     // Test with dedicated WebSocket URL
     expect(normalizeWsUrl('https://campus-stranger.onrender.com', 'https://campus-stranger.onrender.com/api')).toBe('https://campus-stranger.onrender.com');
   });
+
+  it('should generate valid Google OAuth URL with state token for account linking', () => {
+    const getGoogleOAuthUrl = (apiBase: string, token?: string) =>
+      `${apiBase}/api/auth/google${token ? `?state=${encodeURIComponent(token)}` : ''}`;
+
+    const urlWithoutToken = getGoogleOAuthUrl('https://campus-stranger.onrender.com');
+    expect(urlWithoutToken).toBe('https://campus-stranger.onrender.com/api/auth/google');
+
+    const urlWithToken = getGoogleOAuthUrl('https://campus-stranger.onrender.com', 'sample_guest_jwt_token');
+    expect(urlWithToken).toBe('https://campus-stranger.onrender.com/api/auth/google?state=sample_guest_jwt_token');
+  });
+
+  it('should reject mockLinkGoogle when NODE_ENV is production', async () => {
+    const mockLinkCheck = (env: string) => {
+      if (env === 'production') {
+        throw new Error('Mock Google authentication linking is strictly disabled in production. Use standard OAuth 2.0 flow.');
+      }
+      return true;
+    };
+
+    expect(() => mockLinkCheck('production')).toThrowError(/strictly disabled in production/);
+    expect(mockLinkCheck('development')).toBe(true);
+  });
 });

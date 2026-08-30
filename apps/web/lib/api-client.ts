@@ -86,6 +86,9 @@ class ApiClient {
     email?: string,
     displayName?: string,
   ): Promise<{ user: IUser; accessToken: string }> {
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('Mock Google authentication linking is strictly disabled in production. Use standard OAuth 2.0 flow.');
+    }
     const res = await fetch(`${API_BASE}/api/auth/google/mock-link`, {
       method: 'POST',
       headers: this.getHeaders(),
