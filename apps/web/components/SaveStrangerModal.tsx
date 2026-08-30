@@ -16,7 +16,7 @@ export function SaveStrangerModal({
   isOpen,
   onClose,
   conversationId,
-  onSuccess,
+  onSuccess: _onSuccess,
 }: SaveStrangerModalProps) {
   const [alias, setAlias] = useState('');
   const [loading, setLoading] = useState(false);
