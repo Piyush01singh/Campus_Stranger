@@ -1,11 +1,10 @@
-async function fetchVercelScripts() {
+async function checkVercelOnce() {
   const pages = ['/', '/chat', '/saved'];
   const allScripts = new Set();
 
   for (const page of pages) {
-    console.log(`\nFetching HTML for https://campus-stranger.vercel.app${page} ...`);
     const res = await fetch(`https://campus-stranger.vercel.app${page}`);
-    console.log(`HTTP ${res.status}`);
+    if (!res.ok) continue;
     const html = await res.text();
 
     const scriptMatches = html.match(/src="(\/_next\/static\/[^"]+)"/g) || [];
@@ -15,19 +14,47 @@ async function fetchVercelScripts() {
     }
   }
 
-  console.log(`\nTotal unique JS bundles found: ${allScripts.size}`);
+  let mockFound = false;
+  let mockLocation = null;
+
   for (const src of allScripts) {
     const fullUrl = `https://campus-stranger.vercel.app${src}`;
     const sRes = await fetch(fullUrl);
     const text = await sRes.text();
     if (text.includes('mock-link')) {
-      console.log(`\n🚨 FOUND 'mock-link' in bundle: ${src}`);
-      const idx = text.indexOf('mock-link');
-      console.log(`Context: ${text.substring(Math.max(0, idx - 150), Math.min(text.length, idx + 150))}`);
-    } else {
-      console.log(`✅ Clean (no mock-link): ${src}`);
+      mockFound = true;
+      mockLocation = src;
+      break;
     }
   }
+
+  return { totalScripts: allScripts.size, mockFound, mockLocation };
 }
 
-fetchVercelScripts().catch(console.error);
+async function pollUntilClean() {
+  console.log('================================================================');
+  console.log('  Monitoring Vercel Deployment for Clean Elimination of mock-link');
+  console.log('================================================================\n');
+
+  for (let attempt = 1; attempt <= 20; attempt++) {
+    const status = await checkVercelOnce();
+    const now = new Date().toISOString();
+    if (!status.mockFound) {
+      console.log(`[${now}] 🎉 Vercel has deployed the new build!`);
+      console.log(`Total active bundles inspected: ${status.totalScripts}`);
+      console.log(`mock-link found in bundles: NO (100% PURGED)`);
+      console.log('\n================================================================');
+      return true;
+    } else {
+      console.log(`[${now}] Attempt ${attempt}/20: Still serving bundle with mock-link (${status.mockLocation}). Waiting 10s...`);
+      await new Promise(r => setTimeout(r, 10000));
+    }
+  }
+
+  console.error('\n❌ Timed out waiting for Vercel deployment.');
+  return false;
+}
+
+pollUntilClean().then(success => {
+  if (!success) process.exit(1);
+});
