@@ -49,7 +49,7 @@ export class RedisIoAdapter extends IoAdapter {
     }
   }
 
-  createIOServer(port: number, options?: any) {
+  createIOServer(port: number, options?: ServerOptions) {
     const corsOrigin = this.configService.get<string>('corsOrigin', 'http://localhost:3000');
     const origins = corsOrigin.includes(',')
       ? corsOrigin.split(',').map((o) => o.trim())

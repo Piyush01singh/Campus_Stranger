@@ -9,17 +9,29 @@ import { SaveStrangerModal } from '../../components/SaveStrangerModal';
 import { BlockReportModal } from '../../components/BlockReportModal';
 import { apiClient } from '../../lib/api-client';
 import { socketClient } from '../../lib/socket-client';
-import { IUser, IWsMatchFoundPayload, ReportReason } from '@campus-stranger/shared-types';
+import {
+  IUser,
+  IWsMatchFoundPayload,
+  IWsSaveRequestReceivedPayload,
+  ReportReason,
+} from '@campus-stranger/shared-types';
 
 function ChatContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const nicknameParam = searchParams.get('nickname');
+  const authTokenParam = searchParams.get('auth_token');
+  const returnConvParam = searchParams.get('return_conv');
 
   const [currentUser, setCurrentUser] = useState<IUser | null>(null);
   const [matchState, setMatchState] = useState<'idle' | 'searching' | 'matched' | 'ended'>('searching');
   const [activeConversation, setActiveConversation] = useState<IWsMatchFoundPayload | null>(null);
   const [endedReason, setEndedReason] = useState<string | null>(null);
+
+  // Mutual Save Request State
+  const [incomingSaveRequest, setIncomingSaveRequest] = useState<IWsSaveRequestReceivedPayload | null>(null);
+  const [isMutualSaved, setIsMutualSaved] = useState(false);
+  const [isSaveRequestPending, setIsSaveRequestPending] = useState(false);
 
   // Modals
   const [saveModalOpen, setSaveModalOpen] = useState(false);
@@ -31,6 +43,12 @@ function ChatContent() {
 
     async function initUserAndMatch() {
       try {
+        // Handle OAuth callback redirect token if present
+        if (authTokenParam) {
+          apiClient.setToken(authTokenParam);
+          window.history.replaceState({}, '', '/chat');
+        }
+
         let user = await apiClient.getMe();
         if (!user) {
           const guest = await apiClient.createGuest(nicknameParam || undefined);
@@ -42,6 +60,13 @@ function ChatContent() {
 
         // Connect socket and join queue
         await socketClient.connect();
+
+        // If returned from OAuth for saving a specific conversation
+        if (returnConvParam && user.accountType === 'authenticated') {
+          socketClient.sendSaveRequest(returnConvParam);
+          setIsSaveRequestPending(true);
+        }
+
         await socketClient.joinMatchmaking();
         setMatchState('searching');
       } catch (err) {
@@ -51,26 +76,59 @@ function ChatContent() {
 
     initUserAndMatch();
 
-    // Listen for match found event
+    // 1. Listen for match found event
     const unsubMatch = socketClient.onMatchFound((payload) => {
       setActiveConversation(payload);
       setMatchState('matched');
       setEndedReason(null);
+      setIncomingSaveRequest(null);
+      setIsMutualSaved(false);
+      setIsSaveRequestPending(false);
     });
 
-    // Listen for chat ended event
+    // 2. Listen for chat ended event
     const unsubEnded = socketClient.onChatEnded((reason) => {
       setEndedReason(reason);
       setMatchState('ended');
+      setIncomingSaveRequest(null);
+      setIsSaveRequestPending(false);
+    });
+
+    // 3. Listen for incoming save request (User B)
+    const unsubSaveReq = socketClient.onSaveRequestReceived((payload) => {
+      setIncomingSaveRequest(payload);
+    });
+
+    // 4. Listen for save accepted (both users)
+    const unsubSaveAccept = socketClient.onSaveAccepted(() => {
+      setIsMutualSaved(true);
+      setIncomingSaveRequest(null);
+      setIsSaveRequestPending(false);
+    });
+
+    // 5. Listen for save declined
+    const unsubSaveDecline = socketClient.onSaveDeclined(() => {
+      setIncomingSaveRequest(null);
+      setIsSaveRequestPending(false);
+    });
+
+    // 6. Listen for save cancelled
+    const unsubSaveCancel = socketClient.onSaveCancelled(() => {
+      setIncomingSaveRequest(null);
+      setIsSaveRequestPending(false);
     });
 
     return () => {
       isMounted = false;
       unsubMatch();
       unsubEnded();
+      unsubSaveReq();
+      unsubSaveAccept();
+      unsubSaveDecline();
+      unsubSaveCancel();
       socketClient.leaveMatchmaking();
     };
-  }, [nicknameParam]);
+  }, [nicknameParam, authTokenParam, returnConvParam]);
 
   const handleNextStranger = () => {
     if (activeConversation) {
@@ -81,6 +139,9 @@ function ChatContent() {
     setActiveConversation(null);
     setMatchState('searching');
     setEndedReason(null);
+    setIncomingSaveRequest(null);
+    setIsMutualSaved(false);
+    setIsSaveRequestPending(false);
   };
 
   const handleCancelMatch = () => {
@@ -106,9 +167,33 @@ function ChatContent() {
     }
   };
 
+  const handleSendSaveRequest = () => {
+    if (activeConversation) {
+      socketClient.sendSaveRequest(activeConversation.conversationId);
+      setIsSaveRequestPending(true);
+    }
+  };
+
+  const handleAcceptSaveRequest = () => {
+    if (activeConversation) {
+      socketClient.respondToSaveRequest(activeConversation.conversationId, 'accepted');
+    }
+  };
+
+  const handleDeclineSaveRequest = () => {
+    if (activeConversation) {
+      socketClient.respondToSaveRequest(activeConversation.conversationId, 'declined');
+      setIncomingSaveRequest(null);
+    }
+  };
+
   return (
     <div className="h-screen max-h-[100dvh] flex flex-col overflow-hidden bg-background text-foreground transition-colors selection:bg-coral-light selection:text-coral-dark">
-      <Navbar user={currentUser} onOpenAuthModal={() => setSaveModalOpen(true)} />
+      <Navbar
+        user={currentUser}
+        onOpenAuthModal={() => setSaveModalOpen(true)}
+        onLogout={() => setCurrentUser(null)}
+      />
 
       <main className="flex-1 flex flex-col min-h-0 overflow-hidden w-full">
         {matchState === 'searching' && (
@@ -122,6 +207,11 @@ function ChatContent() {
             currentUser={currentUser}
             conversationId={activeConversation.conversationId}
             partnerDisplayName={activeConversation.partnerDisplayName}
+            incomingSaveRequest={incomingSaveRequest}
+            isMutualSaved={isMutualSaved}
+            isSaveRequestPending={isSaveRequestPending}
+            onAcceptSaveRequest={handleAcceptSaveRequest}
+            onDeclineSaveRequest={handleDeclineSaveRequest}
             onNextStranger={handleNextStranger}
             onOpenSaveModal={() => setSaveModalOpen(true)}
             onOpenBlockModal={() => setBlockModalOpen(true)}
@@ -159,6 +249,10 @@ function ChatContent() {
         isOpen={saveModalOpen}
         onClose={() => setSaveModalOpen(false)}
         conversationId={activeConversation?.conversationId}
+        currentUser={currentUser}
+        partnerDisplayName={activeConversation?.partnerDisplayName}
+        onSendSaveRequest={handleSendSaveRequest}
+        isSaveRequestPending={isSaveRequestPending}
         onSuccess={(u) => setCurrentUser(u)}
       />
 

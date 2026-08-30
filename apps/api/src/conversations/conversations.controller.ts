@@ -1,49 +1,27 @@
-import { Body, Controller, Delete, Get, Param, Post, Request, UseGuards } from '@nestjs/common';
+import { Controller, Delete, Get, Param, Request, UseGuards } from '@nestjs/common';
 import { ConversationsService, SavedStrangerView } from './conversations.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
+import { ChatGateway } from '../realtime/chat.gateway';
 import {
   IApiSuccessResponse,
   IEncryptedMessageEnvelope,
-  ISavedConnection,
   IUser,
+  toConversationId,
 } from '@campus-stranger/shared-types';
-import { IsOptional, IsString, MaxLength } from 'class-validator';
-
-export class SaveConversationDto {
-  @IsString()
-  @IsOptional()
-  @MaxLength(100)
-  alias?: string;
-}
 
 @UseGuards(JwtAuthGuard)
 @Controller('conversations')
 export class ConversationsController {
-  constructor(private readonly conversationsService: ConversationsService) {}
+  constructor(
+    private readonly conversationsService: ConversationsService,
+    private readonly chatGateway: ChatGateway,
+  ) {}
 
   @Get('saved')
   async getSavedStrangers(
     @Request() req: { user: IUser },
   ): Promise<IApiSuccessResponse<SavedStrangerView[]>> {
     const data = await this.conversationsService.getSavedStrangers(req.user.id);
-    return {
-      success: true,
-      data,
-      timestamp: new Date().toISOString(),
-    };
-  }
-
-  @Post(':id/save')
-  async saveConversation(
-    @Request() req: { user: IUser },
-    @Param('id') conversationId: string,
-    @Body() dto: SaveConversationDto,
-  ): Promise<IApiSuccessResponse<ISavedConnection>> {
-    const data = await this.conversationsService.saveConversation(
-      req.user.id,
-      conversationId,
-      dto.alias,
-    );
     return {
       success: true,
       data,
@@ -67,18 +45,32 @@ export class ConversationsController {
     };
   }
 
+  /**
+   * Mutually deletes a saved conversation for both participants.
+   * Removes saved_connections and encrypted messages (Option A).
+   * Returns a realtime deletion event via the chat gateway.
+   */
   @Delete(':id/saved')
-  async removeSavedStranger(
+  async deleteSavedConversation(
     @Request() req: { user: IUser },
     @Param('id') conversationId: string,
-  ): Promise<IApiSuccessResponse<{ removed: boolean }>> {
-    const removed = await this.conversationsService.removeSavedConnection(
+  ): Promise<IApiSuccessResponse<{ deleted: boolean }>> {
+    const result = await this.conversationsService.deleteMutualSavedConnection(
       req.user.id,
       conversationId,
     );
+
+    if (result.deleted) {
+      await this.chatGateway.notifySaveDeleted(
+        toConversationId(conversationId),
+        req.user.displayName,
+        result.otherUserId,
+      );
+    }
+
     return {
       success: true,
-      data: { removed },
+      data: { deleted: result.deleted },
       timestamp: new Date().toISOString(),
     };
   }

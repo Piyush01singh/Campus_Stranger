@@ -10,6 +10,15 @@ import {
   IWsMatchFoundPayload,
   IWsMessageSentAckPayload,
   IWsMessageStatusUpdatePayload,
+  IWsSaveAcceptedPayload,
+  IWsSaveCancelledPayload,
+  IWsSaveDeclinedPayload,
+  IWsSaveDeletedPayload,
+  IWsSaveRequestPayload,
+  IWsSaveRequestReceivedPayload,
+  IWsSaveRespondPayload,
+  IWsSyncCompletedPayload,
+  IWsSyncPayload,
   MessageId,
   toConversationId,
   toUserId,
@@ -34,6 +43,12 @@ export type TypingCallback = (isTyping: boolean) => void;
 export type MessageAckCallback = (ack: IWsMessageSentAckPayload) => void;
 export type MessageStatusCallback = (status: IWsMessageStatusUpdatePayload) => void;
 export type ChatEndedCallback = (reason: string) => void;
+export type SaveRequestReceivedCallback = (payload: IWsSaveRequestReceivedPayload) => void;
+export type SaveAcceptedCallback = (payload: IWsSaveAcceptedPayload) => void;
+export type SaveDeclinedCallback = (payload: IWsSaveDeclinedPayload) => void;
+export type SaveCancelledCallback = (payload: IWsSaveCancelledPayload) => void;
+export type SaveDeletedCallback = (payload: IWsSaveDeletedPayload) => void;
+export type SyncCompletedCallback = (payload: IWsSyncCompletedPayload) => void;
 
 class SocketClient {
   private socket: Socket | null = null;
@@ -46,6 +61,12 @@ class SocketClient {
   private onMessageAckListeners: Set<MessageAckCallback> = new Set();
   private onMessageStatusListeners: Set<MessageStatusCallback> = new Set();
   private onChatEndedListeners: Set<ChatEndedCallback> = new Set();
+  private onSaveRequestReceivedListeners: Set<SaveRequestReceivedCallback> = new Set();
+  private onSaveAcceptedListeners: Set<SaveAcceptedCallback> = new Set();
+  private onSaveDeclinedListeners: Set<SaveDeclinedCallback> = new Set();
+  private onSaveCancelledListeners: Set<SaveCancelledCallback> = new Set();
+  private onSaveDeletedListeners: Set<SaveDeletedCallback> = new Set();
+  private onSyncCompletedListeners: Set<SyncCompletedCallback> = new Set();
 
   connect(): Promise<Socket> {
     if (this.socket && this.socket.connected && this.isAuthenticated) {
@@ -185,6 +206,30 @@ class SocketClient {
     this.socket.on(WsServerEvents.CHAT_ENDED, (payload: { reason: string }) => {
       this.onChatEndedListeners.forEach((cb) => cb(payload.reason));
     });
+
+    this.socket.on(WsServerEvents.SAVE_REQUEST_RECEIVED, (payload: IWsSaveRequestReceivedPayload) => {
+      this.onSaveRequestReceivedListeners.forEach((cb) => cb(payload));
+    });
+
+    this.socket.on(WsServerEvents.SAVE_ACCEPTED, (payload: IWsSaveAcceptedPayload) => {
+      this.onSaveAcceptedListeners.forEach((cb) => cb(payload));
+    });
+
+    this.socket.on(WsServerEvents.SAVE_DECLINED, (payload: IWsSaveDeclinedPayload) => {
+      this.onSaveDeclinedListeners.forEach((cb) => cb(payload));
+    });
+
+    this.socket.on(WsServerEvents.SAVE_CANCELLED, (payload: IWsSaveCancelledPayload) => {
+      this.onSaveCancelledListeners.forEach((cb) => cb(payload));
+    });
+
+    this.socket.on(WsServerEvents.SAVE_DELETED, (payload: IWsSaveDeletedPayload) => {
+      this.onSaveDeletedListeners.forEach((cb) => cb(payload));
+    });
+
+    this.socket.on(WsServerEvents.SYNC_COMPLETED, (payload: IWsSyncCompletedPayload) => {
+      this.onSyncCompletedListeners.forEach((cb) => cb(payload));
+    });
   }
 
   async joinMatchmaking() {
@@ -253,6 +298,28 @@ class SocketClient {
     this.socket?.emit(WsClientEvents.CHAT_REPORT, payload);
   }
 
+  sendSaveRequest(conversationId: string) {
+    const payload: IWsSaveRequestPayload = {
+      conversationId: toConversationId(conversationId),
+    };
+    this.socket?.emit(WsClientEvents.SAVE_REQUEST, payload);
+  }
+
+  respondToSaveRequest(conversationId: string, response: 'accepted' | 'declined') {
+    const payload: IWsSaveRespondPayload = {
+      conversationId: toConversationId(conversationId),
+      response,
+    };
+    this.socket?.emit(WsClientEvents.SAVE_RESPOND, payload);
+  }
+
+  sync(conversationId: string) {
+    const payload: IWsSyncPayload = {
+      conversationId: toConversationId(conversationId),
+    };
+    this.socket?.emit(WsClientEvents.SYNC, payload);
+  }
+
   onMatchFound(cb: MatchFoundCallback) {
     this.onMatchFoundListeners.add(cb);
     return () => this.onMatchFoundListeners.delete(cb);
@@ -283,9 +350,40 @@ class SocketClient {
     return () => this.onChatEndedListeners.delete(cb);
   }
 
+  onSaveRequestReceived(cb: SaveRequestReceivedCallback) {
+    this.onSaveRequestReceivedListeners.add(cb);
+    return () => this.onSaveRequestReceivedListeners.delete(cb);
+  }
+
+  onSaveAccepted(cb: SaveAcceptedCallback) {
+    this.onSaveAcceptedListeners.add(cb);
+    return () => this.onSaveAcceptedListeners.delete(cb);
+  }
+
+  onSaveDeclined(cb: SaveDeclinedCallback) {
+    this.onSaveDeclinedListeners.add(cb);
+    return () => this.onSaveDeclinedListeners.delete(cb);
+  }
+
+  onSaveCancelled(cb: SaveCancelledCallback) {
+    this.onSaveCancelledListeners.add(cb);
+    return () => this.onSaveCancelledListeners.delete(cb);
+  }
+
+  onSaveDeleted(cb: SaveDeletedCallback) {
+    this.onSaveDeletedListeners.add(cb);
+    return () => this.onSaveDeletedListeners.delete(cb);
+  }
+
+  onSyncCompleted(cb: SyncCompletedCallback) {
+    this.onSyncCompletedListeners.add(cb);
+    return () => this.onSyncCompletedListeners.delete(cb);
+  }
+
   disconnect() {
     this.socket?.disconnect();
     this.socket = null;
+    this.isAuthenticated = false;
   }
 }
 

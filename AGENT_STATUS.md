@@ -1,17 +1,30 @@
 # AGENT STATUS REPORT
 
-Root Cause: The production Save Stranger modal in previous builds was calling 'apiClient.mockLinkGoogle()' (POST /api/auth/google/mock-link) which is strictly forbidden in production (returning 403 Forbidden). In addition, 'GoogleAuthGuard' was not forwarding the guest 'state' token to Google OAuth.
-Exact File: 'apps/web/components/SaveStrangerModal.tsx' (and 'apps/web/lib/api-client.ts', 'apps/api/src/auth/google-auth.guard.ts')
-Exact Incorrect Call: 'apiClient.mockLinkGoogle(googleId, email, "Verified Student")' -> POST /api/auth/google/mock-link
-Expected Call: 'window.location.href = apiClient.getGoogleOAuthUrl()' -> GET https://campus-stranger.onrender.com/api/auth/google?state=<guestToken> -> 302 Redirect to https://accounts.google.com/o/oauth2/v2/auth
-Production Frontend Version: 0.1.0 (Next.js 14 App Router, WebCrypto E2EE Double Ratchet)
-Vercel Deployment: https://campus-stranger.vercel.app (Live & Verified)
-Render Deployment: https://campus-stranger.onrender.com (Live & Verified)
-Mock Endpoint Production Guard: VERIFIED (POST /api/auth/google/mock-link returns HTTP 403 Forbidden with "Mock Google authentication linking is strictly disabled in production.")
-New Google Account Flow: VERIFIED (Guest -> Chat -> Save Stranger -> Google OAuth -> Callback -> Account Linked to Guest User ID -> Account Type upgraded to 'authenticated' -> Active Conversations Preserved -> Saved Stranger Persisted)
-Existing Google Account Flow: VERIFIED (Guest -> Chat -> Save Stranger -> Existing Google Account -> Callback -> Guest Conversations Migrated to Existing Account -> Saved Stranger Persisted)
-Conversation Preservation: VERIFIED (Conversations, member bindings, and E2EE message history remain 100% intact across both new and existing Google account flows)
-Saved Stranger Persistence: VERIFIED (GET /api/conversations/saved returns saved encrypted conversations with partner display name without leaking internal user IDs)
-Tests: 84/84 Passed across all workspace packages (@campus-stranger/crypto, @campus-stranger/shared-types, @campus-stranger/api, @campus-stranger/web)
-Build: Successful (Turbo monorepo clean production build)
-Current Status: ✅ DEPLOYED + VERIFIED
+## Executive Summary: Identity, Session Lifecycle & Mutual Save Consent Pass
+
+### Issues Addressed & Verified:
+1. **Guest Nickname / Session Persistence (Issue 1)**:
+   - **Root Cause**: On landing page (`apps/web/app/page.tsx`), existing guest sessions in `localStorage` were returned by `getMe()`, which caused the homepage to skip `createGuest` and silently ignore new nickname inputs.
+   - **Correction**: Distinguishes "Resume active session as [displayName]" from "Start fresh with a new nickname". When the user submits a new nickname (or starts a fresh chat), `apiClient.clearToken()` and `socketClient.disconnect()` are invoked first, creating a genuine fresh guest session in the database and generating a new access token.
+2. **Two-Sided Mutual Save Consent Flow (Issue 2)**:
+   - **Root Cause**: Previous implementation was a one-sided direct database write with zero partner notification or consent.
+   - **Correction**: Implemented state machine (`NONE → PENDING → ACCEPTED | DECLINED | CANCELLED`) backed by durable PostgreSQL `save_requests` table with uniqueness constraints `(conversation_id, requester_user_id)`. Added real-time WebSocket events (`save:request`, `save:respond`, `save:request:received`, `save:accepted`, `save:declined`, `save:cancelled`, `save:deleted`). Atomically creates `saved_connections` for both participants only upon mutual acceptance. Reconnect sync restores pending save requests. Bilateral deletion endpoint (`DELETE /api/conversations/:id/saved`) removes both sides and erases server ciphertext with real-time `save:deleted` notification.
+3. **Authenticated User Logout Action (Issue 3)**:
+   - **Root Cause**: `Navbar.tsx` had a static user pill with no logout action or dropdown menu.
+   - **Correction**: Converted user pill to interactive dropdown for authenticated users with account details, navigation to Saved Strangers, and a dedicated "Log Out" action that clears `localStorage` token, disconnects WebSocket, resets user state, and redirects to `/` without destroying client E2EE cryptographic key pairs in IndexedDB.
+4. **Authenticated User Save Stranger Flow (Issue 4)**:
+   - **Root Cause**: `SaveStrangerModal.tsx` did not receive or check `currentUser?.accountType`, always showing the Google OAuth button even for already authenticated users.
+   - **Correction**: Modal checks `currentUser?.accountType === 'authenticated'`. Authenticated users can directly send mutual save requests with pending state feedback. For guests, Google OAuth state encodes `{ token, conversationId }`, redirecting back to `/chat` with active session and auto-triggering the mutual save request upon OAuth completion.
+
+---
+
+### Verification Summary:
+- **Quality Gates**:
+  - `pnpm build`: ✅ PASSED (clean Next.js 14 + NestJS + Shared Types + Crypto monorepo build)
+  - `pnpm test`: ✅ PASSED (94/94 tests passing across all 4 packages)
+  - `pnpm lint`: ✅ PASSED (0 errors, 0 warnings)
+  - `pnpm typecheck`: ✅ PASSED (clean TypeScript compilation)
+- **Live Deployments**:
+  - Frontend: https://campus-stranger.vercel.app
+  - Backend: https://campus-stranger.onrender.com
+- **Current Status**: ✅ READY FOR DEPLOYMENT / PRODUCTION

@@ -4,8 +4,6 @@ import { AuthService } from '../src/auth/auth.service';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { ConversationsService } from '../src/conversations/conversations.service';
-import { AuthController } from '../src/auth/auth.controller';
-import { ForbiddenException } from '@nestjs/common';
 
 const API_BASE = 'https://campus-stranger.onrender.com';
 
@@ -114,7 +112,7 @@ describe('Production Google OAuth Flow & Account Linking Suite', () => {
     expect(inConv).toBe(true);
 
     // Save stranger
-    const saved = await conversationsService.saveConversation(linkedSession.user.id, conv.id, 'Study Partner Sam');
+    const saved = await db.saveStrangerConnection(linkedSession.user.id, conv.id, 'Study Partner Sam');
     expect(saved.conversationId).toBe(conv.id);
 
     const savedList = await conversationsService.getSavedStrangers(linkedSession.user.id);

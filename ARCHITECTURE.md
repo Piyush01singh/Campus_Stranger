@@ -33,8 +33,17 @@
    - The server routes and stores only `IEncryptedPayload` (`ciphertext`, `iv`, `protocolVersion`, `keyId`).
    - The backend contains ZERO plaintext message content.
 
-## Identity & Account Linking
+## Identity, Session Lifecycle & Mutual Save Consent
 
-- **Guest Users**: Assigned a random internal `UserId`, arbitrary display name, and session JWT.
+- **Guest Users**: Assigned a random internal `UserId`, chosen or default display name, and session JWT.
+- **Session Distinction**: Landing page distinguishes between resuming an active existing session and starting fresh with a new nickname (which clears the old token and starts a new session).
 - **Google Authentication**: Links an `AuthAccount` record to the existing `UserId`.
 - **Session Preservation**: Upgrading to Google OAuth preserves active conversations, saved stranger connections, and cryptographic identity without creating duplicate user records.
+- **Two-Sided Mutual Save Consent**:
+  - State machine: `NONE → PENDING → ACCEPTED | DECLINED | CANCELLED` backed by `save_requests` table.
+  - WebSocket events: `save:request`, `save:respond`, `save:request:received`, `save:accepted`, `save:declined`, `save:cancelled`, `save:deleted`.
+  - Atomically creates `saved_connections` for both participants on acceptance.
+- **Bilateral Deletion**:
+  - Either participant can delete a saved conversation, removing the connection for both and erasing persisted ciphertext from PostgreSQL.
+  - Live partner is notified via `save:deleted` WebSocket event.
+- **Logout**: Authenticated users can log out via Navbar dropdown, clearing client tokens and resetting active connection state while preserving local E2EE keys in IndexedDB.

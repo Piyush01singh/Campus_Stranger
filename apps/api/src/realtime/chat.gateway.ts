@@ -28,6 +28,13 @@ import {
   IWsMatchFoundPayload,
   IWsMessageSentAckPayload,
   IWsMessageStatusUpdatePayload,
+  IWsSaveAcceptedPayload,
+  IWsSaveCancelledPayload,
+  IWsSaveDeclinedPayload,
+  IWsSaveDeletedPayload,
+  IWsSaveRequestReceivedPayload,
+  IWsSaveRespondPayload,
+  IWsSaveRequestPayload,
   IWsSyncCompletedPayload,
   IWsSyncPayload,
   ReportReason,
@@ -428,6 +435,17 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     await this.db.endConversation(convId);
 
+    // Cancel any pending save requests for this conversation
+    const cancelledRequests = await this.db.cancelPendingSaveRequests(convId);
+    for (const req of cancelledRequests) {
+      const cancelPayload: IWsSaveCancelledPayload = {
+        requestId: req.id,
+        conversationId: convId,
+        reason: 'conversation_ended',
+      };
+      this.server.to(`conv_${convId}`).emit(WsServerEvents.SAVE_CANCELLED, cancelPayload);
+    }
+
     // Notify partner that chat ended
     client.to(`conv_${convId}`).emit(WsServerEvents.CHAT_ENDED, {
       conversationId: convId,
@@ -468,6 +486,17 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       await this.db.blockUser(user.id, targetUserId);
     }
     await this.db.endConversation(convId);
+
+    // Cancel any pending save requests for this conversation
+    const cancelledOnBlock = await this.db.cancelPendingSaveRequests(convId);
+    for (const req of cancelledOnBlock) {
+      const cancelPayload: IWsSaveCancelledPayload = {
+        requestId: req.id,
+        conversationId: convId,
+        reason: 'conversation_ended',
+      };
+      this.server.to(`conv_${convId}`).emit(WsServerEvents.SAVE_CANCELLED, cancelPayload);
+    }
 
     client.to(`conv_${convId}`).emit(WsServerEvents.CHAT_ENDED, {
       conversationId: convId,
@@ -543,10 +572,26 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     client.join(`conv_${convId}`);
     client.data.activeConversationId = convId;
 
+    // Include any pending save request targeting this user for reconnect sync
+    let pendingSaveRequest: IWsSaveRequestReceivedPayload | undefined;
+    const pendingReq = await this.db.getPendingSaveRequestForConversation(convId, user.id);
+    if (pendingReq) {
+      const requester = await this.db.findUserById(pendingReq.requesterUserId);
+      if (requester) {
+        pendingSaveRequest = {
+          requestId: pendingReq.id,
+          conversationId: convId,
+          requesterDisplayName: requester.displayName,
+          createdAt: pendingReq.createdAt,
+        };
+      }
+    }
+
     const syncResp: IWsSyncCompletedPayload = {
       conversationId: convId,
       messages,
       hasMore: false,
+      pendingSaveRequest,
     };
     client.emit(WsServerEvents.SYNC_COMPLETED, syncResp);
   }
@@ -561,4 +606,192 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       serverTimestamp: Date.now(),
     });
   }
+
+  // --- 9. Mutual Save Request ---
+
+  /**
+   * User A initiates a save request toward User B.
+   * Idempotent: returns existing pending request if one exists.
+   * Authorization: verified member of conversation, not blocked.
+   */
+  @SubscribeMessage(WsClientEvents.SAVE_REQUEST)
+  async handleSaveRequest(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() payload: IWsSaveRequestPayload,
+  ) {
+    const user = client.data.user;
+    if (!user || !payload?.conversationId) {
+      client.emit(WsServerEvents.CHAT_ERROR, { code: 'UNAUTHORIZED', message: 'Authentication required to save' });
+      return;
+    }
+
+    const convId = toConversationId(payload.conversationId);
+    const conv = await this.db.findConversationById(convId);
+    if (!conv || conv.status === 'ended' || conv.status === 'deleted') {
+      client.emit(WsServerEvents.CHAT_ERROR, { code: 'FORBIDDEN', message: 'Conversation is not active' });
+      return;
+    }
+
+    const isMember = await this.db.isUserInConversation(convId, user.id);
+    if (!isMember) {
+      client.emit(WsServerEvents.CHAT_ERROR, { code: 'FORBIDDEN', message: 'Not a member of this conversation' });
+      return;
+    }
+
+    const members = await this.db.getConversationMembers(convId);
+    const partnerMember = members.find((m) => m.userId !== user.id);
+    if (!partnerMember) {
+      client.emit(WsServerEvents.CHAT_ERROR, { code: 'FORBIDDEN', message: 'No partner in this conversation' });
+      return;
+    }
+
+    // Block check
+    if (await this.db.isBlocked(user.id, partnerMember.userId)) {
+      client.emit(WsServerEvents.CHAT_ERROR, { code: 'FORBIDDEN', message: 'Cannot save: user is blocked' });
+      return;
+    }
+
+    // Create or return existing save request (idempotent)
+    const saveReq = await this.db.createOrGetSaveRequest(convId, user.id, partnerMember.userId);
+
+    // If already accepted, notify requester
+    if (saveReq.status === 'accepted') {
+      const acceptPayload: IWsSaveAcceptedPayload = {
+        requestId: saveReq.id,
+        conversationId: convId,
+        isSelfAccept: false,
+      };
+      client.emit(WsServerEvents.SAVE_ACCEPTED, acceptPayload);
+      return;
+    }
+
+    // Notify the partner (target) about the incoming save request
+    const notifyPayload: IWsSaveRequestReceivedPayload = {
+      requestId: saveReq.id,
+      conversationId: convId,
+      requesterDisplayName: user.displayName,
+      createdAt: saveReq.createdAt,
+    };
+
+    // Emit to all sockets of the target user in this conversation room
+    client.to(`conv_${convId}`).emit(WsServerEvents.SAVE_REQUEST_RECEIVED, notifyPayload);
+
+    // Also notify via Redis pub/sub for cross-node delivery
+    const targetSocketIds = await this.redis.getUserSockets(partnerMember.userId);
+    for (const sid of targetSocketIds) {
+      if (sid !== client.id) {
+        this.server.to(sid).emit(WsServerEvents.SAVE_REQUEST_RECEIVED, notifyPayload);
+      }
+    }
+
+    this.logger.log(`Save request ${saveReq.id}: ${user.displayName} → ${partnerMember.userId} in conv ${convId}`);
+  }
+
+  /**
+   * User B responds to a pending save request (accept or decline).
+   * Authorization: only the target user of the request may respond.
+   * On accept: both users' saved_connections are created atomically.
+   */
+  @SubscribeMessage(WsClientEvents.SAVE_RESPOND)
+  async handleSaveRespond(
+    @ConnectedSocket() client: AuthenticatedSocket,
+    @MessageBody() payload: IWsSaveRespondPayload,
+  ) {
+    const user = client.data.user;
+    if (!user || !payload?.conversationId || !payload?.response) {
+      client.emit(WsServerEvents.CHAT_ERROR, { code: 'UNAUTHORIZED', message: 'Authentication required' });
+      return;
+    }
+
+    if (payload.response !== 'accepted' && payload.response !== 'declined') {
+      client.emit(WsServerEvents.CHAT_ERROR, { code: 'INVALID_PAYLOAD', message: 'Invalid response value' });
+      return;
+    }
+
+    const convId = toConversationId(payload.conversationId);
+    const isMember = await this.db.isUserInConversation(convId, user.id);
+    if (!isMember) {
+      client.emit(WsServerEvents.CHAT_ERROR, { code: 'FORBIDDEN', message: 'Not a member of this conversation' });
+      return;
+    }
+
+    // Find the pending save request where this user is the target
+    const pendingReq = await this.db.getPendingSaveRequestForConversation(convId, user.id);
+    if (!pendingReq) {
+      // No pending request for this user — could already be responded to (idempotent)
+      client.emit(WsServerEvents.CHAT_ERROR, { code: 'NOT_FOUND', message: 'No pending save request found' });
+      return;
+    }
+
+    const updated = await this.db.respondToSaveRequest(pendingReq.id, user.id, payload.response);
+    if (!updated) {
+      client.emit(WsServerEvents.CHAT_ERROR, { code: 'FORBIDDEN', message: 'Cannot respond to this save request' });
+      return;
+    }
+
+    if (payload.response === 'accepted') {
+      const acceptPayloadForAccepter: IWsSaveAcceptedPayload = {
+        requestId: updated.id,
+        conversationId: convId,
+        isSelfAccept: true,
+      };
+      const acceptPayloadForRequester: IWsSaveAcceptedPayload = {
+        requestId: updated.id,
+        conversationId: convId,
+        isSelfAccept: false,
+      };
+
+      // Notify accepter (User B)
+      client.emit(WsServerEvents.SAVE_ACCEPTED, acceptPayloadForAccepter);
+      // Notify requester (User A) via room broadcast
+      client.to(`conv_${convId}`).emit(WsServerEvents.SAVE_ACCEPTED, acceptPayloadForRequester);
+
+      // Cross-node: also emit to requester's sockets directly
+      const requesterSocketIds = await this.redis.getUserSockets(updated.requesterUserId);
+      for (const sid of requesterSocketIds) {
+        this.server.to(sid).emit(WsServerEvents.SAVE_ACCEPTED, acceptPayloadForRequester);
+      }
+
+      this.logger.log(`Save request ${updated.id} ACCEPTED in conv ${convId}`);
+    } else {
+      const declinePayload: IWsSaveDeclinedPayload = {
+        requestId: updated.id,
+        conversationId: convId,
+      };
+      // Notify both users
+      client.emit(WsServerEvents.SAVE_DECLINED, declinePayload);
+      client.to(`conv_${convId}`).emit(WsServerEvents.SAVE_DECLINED, declinePayload);
+
+      const requesterSocketIds = await this.redis.getUserSockets(updated.requesterUserId);
+      for (const sid of requesterSocketIds) {
+        this.server.to(sid).emit(WsServerEvents.SAVE_DECLINED, declinePayload);
+      }
+
+      this.logger.log(`Save request ${updated.id} DECLINED in conv ${convId}`);
+    }
+  }
+
+  /**
+   * Emits a save:deleted realtime event to the partner when one user deletes the saved chat.
+   * Called from the ConversationsController after successful bilateral deletion.
+   */
+  async notifySaveDeleted(
+    conversationId: ConversationId,
+    deletedByDisplayName: string,
+    otherUserId: string | null,
+  ): Promise<void> {
+    const deletePayload: IWsSaveDeletedPayload = {
+      conversationId,
+      deletedByDisplayName,
+    };
+    this.server.to(`conv_${conversationId}`).emit(WsServerEvents.SAVE_DELETED, deletePayload);
+
+    if (otherUserId) {
+      const otherSocketIds = await this.redis.getUserSockets(toUserId(otherUserId));
+      for (const sid of otherSocketIds) {
+        this.server.to(sid).emit(WsServerEvents.SAVE_DELETED, deletePayload);
+      }
+    }
+  }
 }
+

@@ -104,7 +104,7 @@ describe('Auth & Matchmaking & Saved Strangers Flow', () => {
     expect(stillMember).toBe(true);
 
     // Save conversation
-    const saved = await conversationsService.saveConversation(
+    const saved = await db.saveStrangerConnection(
       originalUserId,
       conv.id,
       'Campus Study Friend',

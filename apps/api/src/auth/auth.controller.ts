@@ -81,9 +81,9 @@ export class AuthController {
   @Get('google/callback')
   async googleAuthCallback(@Req() req: { user: GoogleValidatedUser }, @Res() res: Response) {
     const frontendUrl = this.configService.get<string>('frontendUrl', 'http://localhost:3000');
-    const guestUserId = req.user?.state
-      ? this.authService.extractUserIdFromState(req.user.state)
-      : undefined;
+    const stateData = req.user?.state
+      ? this.authService.extractStateData(req.user.state)
+      : {};
 
     const session = await this.authService.findOrCreateGoogleUser(
       {
@@ -91,10 +91,16 @@ export class AuthController {
         email: req.user.email,
         displayName: req.user.displayName,
       },
-      guestUserId || undefined,
+      stateData.userId,
     );
 
-    res.redirect(`${frontendUrl}/saved?auth_token=${encodeURIComponent(session.accessToken)}`);
+    if (stateData.conversationId) {
+      res.redirect(
+        `${frontendUrl}/chat?auth_token=${encodeURIComponent(session.accessToken)}&return_conv=${encodeURIComponent(stateData.conversationId)}`,
+      );
+    } else {
+      res.redirect(`${frontendUrl}/saved?auth_token=${encodeURIComponent(session.accessToken)}`);
+    }
   }
 
   /**

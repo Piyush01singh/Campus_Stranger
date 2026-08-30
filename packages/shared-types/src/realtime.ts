@@ -15,6 +15,10 @@ export const WsClientEvents = {
   CHAT_REPORT: 'chat:report',
   HEARTBEAT: 'heartbeat',
   SYNC: 'sync',
+  /** Mutual Save Request: User A initiates save request toward User B */
+  SAVE_REQUEST: 'save:request',
+  /** Mutual Save Respond: User B accepts or declines a pending save request */
+  SAVE_RESPOND: 'save:respond',
 } as const;
 
 export type WsClientEventType = (typeof WsClientEvents)[keyof typeof WsClientEvents];
@@ -32,6 +36,16 @@ export const WsServerEvents = {
   CHAT_ENDED: 'chat:ended',
   CHAT_ERROR: 'chat:error',
   SYNC_COMPLETED: 'sync:completed',
+  /** Delivered to User B: someone wants to save the chat */
+  SAVE_REQUEST_RECEIVED: 'save:request:received',
+  /** Delivered to both users when the save request is accepted */
+  SAVE_ACCEPTED: 'save:accepted',
+  /** Delivered to both users when the save request is declined */
+  SAVE_DECLINED: 'save:declined',
+  /** Delivered to both users when a pending save request is cancelled (e.g. chat ended) */
+  SAVE_CANCELLED: 'save:cancelled',
+  /** Delivered to both users when a saved connection is mutually deleted */
+  SAVE_DELETED: 'save:deleted',
 } as const;
 
 export type WsServerEventType = (typeof WsServerEvents)[keyof typeof WsServerEvents];
@@ -149,4 +163,57 @@ export interface IWsSyncCompletedPayload {
   conversationId: ConversationId;
   messages: IEncryptedMessageEnvelope[];
   hasMore: boolean;
+  /** Pending save request targeting the authenticated user, if any */
+  pendingSaveRequest?: IWsSaveRequestReceivedPayload;
 }
+
+// --- Mutual Save Request Payloads ---
+
+/** Client → Server: User A requests to save the conversation */
+export interface IWsSaveRequestPayload {
+  conversationId: ConversationId;
+}
+
+/** Client → Server: User B responds to a pending save request */
+export interface IWsSaveRespondPayload {
+  conversationId: ConversationId;
+  response: 'accepted' | 'declined';
+}
+
+/** Server → User B: incoming save request notification */
+export interface IWsSaveRequestReceivedPayload {
+  requestId: string;
+  conversationId: ConversationId;
+  /** Display name of the user who sent the save request */
+  requesterDisplayName: string;
+  createdAt: string;
+}
+
+/** Server → both users: save request was accepted; both are now saved */
+export interface IWsSaveAcceptedPayload {
+  requestId: string;
+  conversationId: ConversationId;
+  /** True for the user who accepted, false for the requester */
+  isSelfAccept: boolean;
+}
+
+/** Server → both users: save request was declined */
+export interface IWsSaveDeclinedPayload {
+  requestId: string;
+  conversationId: ConversationId;
+}
+
+/** Server → both users: pending save request cancelled (e.g. conversation ended) */
+export interface IWsSaveCancelledPayload {
+  requestId: string;
+  conversationId: ConversationId;
+  reason: 'conversation_ended' | 'requester_left';
+}
+
+/** Server → both users: a mutual saved connection was deleted */
+export interface IWsSaveDeletedPayload {
+  conversationId: ConversationId;
+  /** Display name of the user who initiated deletion */
+  deletedByDisplayName: string;
+}
+

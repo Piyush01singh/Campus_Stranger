@@ -1,7 +1,6 @@
 import {
   IApiSuccessResponse,
   IEncryptedMessageEnvelope,
-  ISavedConnection,
   IUser,
 } from '@campus-stranger/shared-types';
 
@@ -17,35 +16,50 @@ export interface ISavedStrangerView {
 }
 
 class ApiClient {
+  private inMemoryToken: string | null = null;
+
   private getHeaders(): HeadersInit {
     const headers: HeadersInit = {
       'Content-Type': 'application/json',
     };
-    if (typeof window !== 'undefined') {
-      const token = localStorage.getItem('cs_auth_token');
-      if (token) {
-        headers['Authorization'] = `Bearer ${token}`;
-      }
+    const token = this.getToken();
+    if (token) {
+      headers['Authorization'] = `Bearer ${token}`;
     }
     return headers;
   }
 
   setToken(token: string) {
+    this.inMemoryToken = token;
     if (typeof window !== 'undefined') {
-      localStorage.setItem('cs_auth_token', token);
+      try {
+        localStorage.setItem('cs_auth_token', token);
+      } catch {
+        // localStorage not accessible
+      }
     }
   }
 
   getToken(): string | null {
     if (typeof window !== 'undefined') {
-      return localStorage.getItem('cs_auth_token');
+      try {
+        const stored = localStorage.getItem('cs_auth_token');
+        if (stored) return stored;
+      } catch {
+        // localStorage not accessible
+      }
     }
-    return null;
+    return this.inMemoryToken;
   }
 
   clearToken() {
+    this.inMemoryToken = null;
     if (typeof window !== 'undefined') {
-      localStorage.removeItem('cs_auth_token');
+      try {
+        localStorage.removeItem('cs_auth_token');
+      } catch {
+        // localStorage not accessible
+      }
     }
   }
 
@@ -76,8 +90,18 @@ class ApiClient {
     }
   }
 
-  getGoogleOAuthUrl(guestToken?: string): string {
+  getGoogleOAuthUrl(guestToken?: string, conversationId?: string): string {
     const token = guestToken || this.getToken();
+    if (!token && !conversationId) {
+      return `${API_BASE}/api/auth/google`;
+    }
+
+    if (conversationId) {
+      const stateObj = { token: token || undefined, conversationId };
+      const stateStr = btoa(JSON.stringify(stateObj));
+      return `${API_BASE}/api/auth/google?state=${encodeURIComponent(stateStr)}`;
+    }
+
     return `${API_BASE}/api/auth/google${token ? `?state=${encodeURIComponent(token)}` : ''}`;
   }
 
@@ -90,17 +114,6 @@ class ApiClient {
     return json.data;
   }
 
-  async saveConversation(conversationId: string, alias?: string): Promise<ISavedConnection> {
-    const res = await fetch(`${API_BASE}/api/conversations/${conversationId}/save`, {
-      method: 'POST',
-      headers: this.getHeaders(),
-      body: JSON.stringify({ alias }),
-    });
-    if (!res.ok) throw new Error('Failed to save stranger conversation');
-    const json: IApiSuccessResponse<ISavedConnection> = await res.json();
-    return json.data;
-  }
-
   async getConversationMessages(conversationId: string): Promise<IEncryptedMessageEnvelope[]> {
     const res = await fetch(`${API_BASE}/api/conversations/${conversationId}/messages`, {
       headers: this.getHeaders(),
@@ -110,12 +123,22 @@ class ApiClient {
     return json.data;
   }
 
-  async removeSavedStranger(conversationId: string): Promise<boolean> {
+  /**
+   * Mutually deletes a saved conversation for both participants from the server.
+   */
+  async deleteMutualSavedConnection(conversationId: string): Promise<boolean> {
     const res = await fetch(`${API_BASE}/api/conversations/${conversationId}/saved`, {
       method: 'DELETE',
       headers: this.getHeaders(),
     });
     return res.ok;
+  }
+
+  /**
+   * Alias for deleteMutualSavedConnection
+   */
+  async removeSavedStranger(conversationId: string): Promise<boolean> {
+    return this.deleteMutualSavedConnection(conversationId);
   }
 
   async blockUser(targetUserId: string): Promise<void> {

@@ -2,10 +2,11 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Bookmark, MessageSquare, Trash2, ArrowLeft, Lock, Users, Sparkles } from 'lucide-react';
+import { Bookmark, MessageSquare, Trash2, ArrowLeft, Lock, Users, Sparkles, AlertTriangle } from 'lucide-react';
 import { Navbar } from '../../components/Navbar';
 import { SaveStrangerModal } from '../../components/SaveStrangerModal';
 import { apiClient } from '../../lib/api-client';
+import { socketClient } from '../../lib/socket-client';
 import { IUser } from '@campus-stranger/shared-types';
 
 interface SavedStrangerItem {
@@ -21,6 +22,9 @@ export default function SavedStrangersPage() {
   const [savedList, setSavedList] = useState<SavedStrangerItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [authModalOpen, setAuthModalOpen] = useState(false);
+  const [deletingConvId, setDeletingConvId] = useState<string | null>(null);
+  const [deletingPartnerName, setDeletingPartnerName] = useState<string>('');
+  const [deleteLoading, setDeleteLoading] = useState(false);
 
   useEffect(() => {
     async function loadSaved() {
@@ -33,18 +37,6 @@ export default function SavedStrangersPage() {
             apiClient.setToken(authToken);
             window.history.replaceState({}, '', '/saved');
           }
-
-          const pendingConv = sessionStorage.getItem('pending_save_conv');
-          if (pendingConv) {
-            const pendingAlias = sessionStorage.getItem('pending_save_alias') || undefined;
-            sessionStorage.removeItem('pending_save_conv');
-            sessionStorage.removeItem('pending_save_alias');
-            try {
-              await apiClient.saveConversation(pendingConv, pendingAlias);
-            } catch (saveErr) {
-              console.warn('Could not auto-save pending conversation:', saveErr);
-            }
-          }
         }
 
         const user = await apiClient.getMe();
@@ -53,6 +45,9 @@ export default function SavedStrangersPage() {
         if (user) {
           const list = await apiClient.getSavedStrangers();
           setSavedList(list);
+
+          // Connect socket to receive realtime updates like mutual deletion
+          await socketClient.connect();
         }
       } catch (err) {
         console.error('Error fetching saved strangers:', err);
@@ -62,20 +57,46 @@ export default function SavedStrangersPage() {
     }
 
     loadSaved();
+
+    // Listen for realtime bilateral deletion by partner
+    const unsubDeleted = socketClient.onSaveDeleted((payload) => {
+      setSavedList((prev) => prev.filter((item) => item.conversationId !== payload.conversationId));
+    });
+
+    return () => {
+      unsubDeleted();
+    };
   }, []);
 
-  const handleRemove = async (conversationId: string) => {
+  const confirmDelete = (conversationId: string, partnerDisplayName: string) => {
+    setDeletingConvId(conversationId);
+    setDeletingPartnerName(partnerDisplayName);
+  };
+
+  const handleExecuteDelete = async () => {
+    if (!deletingConvId) return;
+    setDeleteLoading(true);
     try {
-      await apiClient.removeSavedStranger(conversationId);
-      setSavedList((prev) => prev.filter((item) => item.conversationId !== conversationId));
+      await apiClient.deleteMutualSavedConnection(deletingConvId);
+      setSavedList((prev) => prev.filter((item) => item.conversationId !== deletingConvId));
+      setDeletingConvId(null);
     } catch (err) {
       console.error('Failed to remove saved connection:', err);
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
   return (
     <div className="min-h-screen flex flex-col bg-background text-foreground transition-colors selection:bg-coral-light selection:text-coral-dark">
-      <Navbar user={currentUser} onOpenAuthModal={() => setAuthModalOpen(true)} />
+      <Navbar
+        user={currentUser}
+        onOpenAuthModal={() => setAuthModalOpen(true)}
+        onLogout={() => {
+          setCurrentUser(null);
+          setSavedList([]);
+        }}
+      />
 
       <main className="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 py-8 sm:py-12 space-y-8">
         <div className="flex items-center justify-between">
@@ -91,7 +112,7 @@ export default function SavedStrangersPage() {
                 Saved Strangers
               </h1>
               <p className="text-xs sm:text-sm text-neutral-500 dark:text-neutral-400">
-                Persistent end-to-end encrypted conversations you have retained.
+                Persistent end-to-end encrypted conversations with mutual consent.
               </p>
             </div>
           </div>
@@ -139,7 +160,7 @@ export default function SavedStrangersPage() {
             <div className="space-y-1">
               <h3 className="text-lg font-bold text-neutral-900 dark:text-neutral-100">No Saved Strangers Yet</h3>
               <p className="text-xs sm:text-sm text-neutral-500 dark:text-neutral-400 max-w-sm mx-auto leading-relaxed">
-                When chatting with someone you connect with, click &quot;Save Stranger&quot; to retain your encrypted conversation history.
+                When chatting with someone you connect with, click &quot;Save Stranger&quot; to initiate mutual saving of your encrypted conversation.
               </p>
             </div>
             <div className="pt-2">
@@ -182,9 +203,9 @@ export default function SavedStrangersPage() {
                   </div>
 
                   <button
-                    onClick={() => handleRemove(item.conversationId)}
-                    title="Remove connection"
-                    aria-label={`Remove saved connection with ${item.partnerDisplayName}`}
+                    onClick={() => confirmDelete(item.conversationId, item.partnerDisplayName)}
+                    title="Delete saved conversation"
+                    aria-label={`Delete saved connection with ${item.partnerDisplayName}`}
                     className="p-2 rounded-full text-neutral-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors"
                   >
                     <Trash2 className="w-4 h-4" />
@@ -210,6 +231,52 @@ export default function SavedStrangersPage() {
           </div>
         )}
       </main>
+
+      {/* Mutual Deletion Confirmation Modal */}
+      {deletingConvId && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-in fade-in"
+        >
+          <div className="relative w-full max-w-md p-6 rounded-3xl bg-white dark:bg-neutral-900 border border-[#e5e3de] dark:border-neutral-800 shadow-2xl space-y-4">
+            <div className="flex items-center gap-3 text-red-600 dark:text-red-400">
+              <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-950/50 flex items-center justify-center shrink-0">
+                <AlertTriangle className="w-5 h-5" />
+              </div>
+              <h3 className="text-lg font-bold text-neutral-900 dark:text-neutral-100">
+                Delete Saved Conversation?
+              </h3>
+            </div>
+
+            <p className="text-xs text-neutral-600 dark:text-neutral-400 leading-relaxed">
+              Deleting this saved chat with <strong>{deletingPartnerName}</strong> removes the saved connection and erases encrypted message history from the server for both of you.
+            </p>
+
+            <div className="p-3 rounded-2xl bg-neutral-100 dark:bg-neutral-800/60 text-[11px] text-neutral-500 dark:text-neutral-400">
+              Note: Server-side stored ciphertext is erased immediately. Local client caches on offline devices will be unlinked upon reconnection.
+            </div>
+
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                onClick={() => setDeletingConvId(null)}
+                disabled={deleteLoading}
+                className="px-4 py-2 rounded-full text-xs font-semibold text-neutral-600 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors"
+              >
+                Cancel
+              </button>
+
+              <button
+                onClick={handleExecuteDelete}
+                disabled={deleteLoading}
+                className="px-5 py-2 rounded-full bg-red-600 hover:bg-red-700 active:scale-95 text-white text-xs font-semibold shadow-sm transition-all disabled:opacity-50"
+              >
+                {deleteLoading ? 'Deleting...' : 'Delete for Both'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <SaveStrangerModal
         isOpen={authModalOpen}

@@ -1,25 +1,52 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
-import { Sun, Moon, User as UserIcon } from 'lucide-react';
+import { usePathname, useRouter } from 'next/navigation';
+import { Sun, Moon, User as UserIcon, LogOut, Bookmark, ChevronDown } from 'lucide-react';
 import { IUser } from '@campus-stranger/shared-types';
 import { useTheme } from './theme-provider';
 import { AboutModal } from './AboutModal';
+import { apiClient } from '../lib/api-client';
+import { socketClient } from '../lib/socket-client';
 
 interface NavbarProps {
   user: IUser | null;
   onOpenAuthModal?: () => void;
+  onLogout?: () => void;
 }
 
-export function Navbar({ user, onOpenAuthModal }: NavbarProps) {
+export function Navbar({ user, onOpenAuthModal, onLogout }: NavbarProps) {
   const pathname = usePathname();
+  const router = useRouter();
   const { theme, toggleTheme } = useTheme();
   const [aboutOpen, setAboutOpen] = useState(false);
+  const [dropdownOpen, setDropdownOpen] = useState(false);
+  const dropdownRef = useRef<HTMLDivElement>(null);
 
   const isChatActive = pathname === '/' || pathname.startsWith('/chat');
   const isSavedActive = pathname.startsWith('/saved');
+
+  // Close dropdown on click outside
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+        setDropdownOpen(false);
+      }
+    }
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const handleLogout = () => {
+    setDropdownOpen(false);
+    apiClient.clearToken();
+    socketClient.disconnect();
+    if (onLogout) {
+      onLogout();
+    }
+    router.push('/');
+  };
 
   return (
     <>
@@ -105,21 +132,75 @@ export function Navbar({ user, onOpenAuthModal }: NavbarProps) {
 
           {/* 3. Right Action Controls */}
           <div className="flex items-center gap-1.5 sm:gap-2.5 lg:gap-3 shrink-0">
-            {/* Security Pill: "● Encrypted" (Responsive: hides text on extra small mobile to prevent any overflow) */}
+            {/* Security Pill: "● Encrypted" */}
             <div className="flex items-center gap-1.5 px-2.5 sm:px-3.5 py-1 sm:py-1.5 rounded-full bg-[#e8f7ee] dark:bg-[#162e22] text-[#2d5e3f] dark:text-[#86efac] text-[11px] sm:text-xs font-semibold select-none border border-transparent dark:border-[#225835]/30 shrink-0">
               <span className="w-1.5 h-1.5 sm:w-2 sm:h-2 rounded-full bg-[#22c55e] shrink-0" />
               <span className="hidden xs:inline sm:inline">Encrypted</span>
             </div>
 
-            {/* User Session / Sign In Pill */}
+            {/* User Session Dropdown / Sign In Button */}
             {user ? (
-              <div className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3.5 py-1 sm:py-1.5 rounded-full bg-white dark:bg-neutral-800 border border-[#e5e3de] dark:border-neutral-700 text-[11px] sm:text-xs font-semibold shadow-xs shrink-0 max-w-[130px] sm:max-w-[160px]">
-                <UserIcon className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-coral shrink-0" />
-                <span className="truncate">{user.displayName}</span>
-                {user.accountType === 'authenticated' && (
-                  <span className="hidden sm:inline px-1.5 py-0.5 rounded-full bg-coral/15 text-coral text-[9px] font-bold shrink-0">
-                    Saved
-                  </span>
+              <div className="relative" ref={dropdownRef}>
+                <button
+                  onClick={() => setDropdownOpen((prev) => !prev)}
+                  aria-expanded={dropdownOpen}
+                  aria-label="User account menu"
+                  className="flex items-center gap-1.5 sm:gap-2 px-2.5 sm:px-3.5 py-1 sm:py-1.5 rounded-full bg-white dark:bg-neutral-800 border border-[#e5e3de] dark:border-neutral-700 text-[11px] sm:text-xs font-semibold shadow-xs shrink-0 max-w-[140px] sm:max-w-[180px] hover:border-coral/40 transition-colors cursor-pointer"
+                >
+                  <UserIcon className="w-3 h-3 sm:w-3.5 sm:h-3.5 text-coral shrink-0" />
+                  <span className="truncate">{user.displayName}</span>
+                  {user.accountType === 'authenticated' && (
+                    <span className="hidden sm:inline px-1.5 py-0.5 rounded-full bg-coral/15 text-coral text-[9px] font-bold shrink-0">
+                      Saved
+                    </span>
+                  )}
+                  <ChevronDown className="w-3 h-3 text-neutral-400 shrink-0" />
+                </button>
+
+                {/* Dropdown Menu */}
+                {dropdownOpen && (
+                  <div className="absolute right-0 mt-2 w-48 rounded-2xl bg-white dark:bg-neutral-900 border border-[#e5e3de] dark:border-neutral-800 shadow-xl py-2 z-50 animate-in fade-in slide-in-from-top-1 text-xs">
+                    <div className="px-3.5 py-2 border-b border-[#e5e3de]/60 dark:border-neutral-800">
+                      <p className="font-bold text-neutral-900 dark:text-neutral-100 truncate">
+                        {user.displayName}
+                      </p>
+                      <p className="text-[10px] text-neutral-500 capitalize">
+                        {user.accountType} session
+                      </p>
+                    </div>
+
+                    <Link
+                      href="/saved"
+                      onClick={() => setDropdownOpen(false)}
+                      className="flex items-center gap-2 px-3.5 py-2 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors"
+                    >
+                      <Bookmark className="w-3.5 h-3.5 text-coral" />
+                      <span>Saved Strangers</span>
+                    </Link>
+
+                    {user.accountType === 'guest' && onOpenAuthModal && (
+                      <button
+                        onClick={() => {
+                          setDropdownOpen(false);
+                          onOpenAuthModal();
+                        }}
+                        className="w-full text-left flex items-center gap-2 px-3.5 py-2 text-coral hover:bg-coral-light/20 dark:hover:bg-coral-dark/20 transition-colors font-medium"
+                      >
+                        <UserIcon className="w-3.5 h-3.5" />
+                        <span>Link Google Account</span>
+                      </button>
+                    )}
+
+                    <div className="border-t border-[#e5e3de]/60 dark:border-neutral-800 my-1" />
+
+                    <button
+                      onClick={handleLogout}
+                      className="w-full text-left flex items-center gap-2 px-3.5 py-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors font-semibold"
+                    >
+                      <LogOut className="w-3.5 h-3.5" />
+                      <span>Log Out</span>
+                    </button>
+                  </div>
                 )}
               </div>
             ) : (
@@ -149,7 +230,7 @@ export function Navbar({ user, onOpenAuthModal }: NavbarProps) {
           </div>
         </div>
 
-        {/* Mobile Navigation sub-bar (Clean & responsive, no horizontal scroll) */}
+        {/* Mobile Navigation sub-bar */}
         <div className="md:hidden flex items-center justify-center gap-6 py-2 border-t border-[#e5e3de]/50 dark:border-neutral-800 text-xs font-medium bg-background/95 w-full">
           <Link
             href="/"
@@ -167,7 +248,7 @@ export function Navbar({ user, onOpenAuthModal }: NavbarProps) {
               isSavedActive
                 ? 'text-coral font-bold border-b border-coral'
                 : 'text-neutral-600 dark:text-neutral-400'
-            }`}
+              }`}
           >
             Saved
           </Link>

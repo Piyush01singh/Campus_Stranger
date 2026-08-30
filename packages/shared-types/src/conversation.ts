@@ -1,6 +1,6 @@
 import { ConversationId, UserId } from './ids.js';
 
-export type ConversationStatus = 'active' | 'ended' | 'abandoned';
+export type ConversationStatus = 'active' | 'ended' | 'abandoned' | 'deleted';
 
 export interface IConversation {
   id: ConversationId;
@@ -24,3 +24,17 @@ export interface ISavedConnection {
   alias?: string;
   targetUserId?: UserId;
 }
+
+/** State machine: NONE → PENDING → ACCEPTED | DECLINED | CANCELLED */
+export type SaveRequestStatus = 'pending' | 'accepted' | 'declined' | 'cancelled';
+
+export interface ISaveRequest {
+  id: string;
+  conversationId: ConversationId;
+  requesterUserId: UserId;
+  targetUserId: UserId;
+  status: SaveRequestStatus;
+  createdAt: string;
+  respondedAt?: string;
+}
+

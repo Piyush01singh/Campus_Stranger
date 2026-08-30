@@ -5,16 +5,19 @@ import {
   Send,
   Lock,
   Bookmark,
+  BookmarkCheck,
   FastForward,
   Ban,
   Flag,
   Check,
   CheckCheck,
   ShieldCheck,
+  Clock,
 } from 'lucide-react';
 import { socketClient } from '../lib/socket-client';
 import { cryptoManager } from '../lib/crypto-manager';
-import { IUser, MessageStatus } from '@campus-stranger/shared-types';
+import { IUser, MessageStatus, IWsSaveRequestReceivedPayload } from '@campus-stranger/shared-types';
+import { SaveRequestNotification } from './SaveRequestNotification';
 
 export interface ChatMessage {
   id: string;
@@ -31,6 +34,11 @@ interface ChatRoomProps {
   partnerDisplayName: string;
   partnerUserId?: string;
   initialMessages?: ChatMessage[];
+  incomingSaveRequest?: IWsSaveRequestReceivedPayload | null;
+  isMutualSaved?: boolean;
+  isSaveRequestPending?: boolean;
+  onAcceptSaveRequest?: () => void;
+  onDeclineSaveRequest?: () => void;
   onNextStranger: () => void;
   onOpenSaveModal: () => void;
   onOpenBlockModal: () => void;
@@ -42,6 +50,11 @@ export function ChatRoom({
   conversationId,
   partnerDisplayName,
   initialMessages = [],
+  incomingSaveRequest,
+  isMutualSaved = false,
+  isSaveRequestPending = false,
+  onAcceptSaveRequest,
+  onDeclineSaveRequest,
   onNextStranger,
   onOpenSaveModal,
   onOpenBlockModal,
@@ -60,7 +73,7 @@ export function ChatRoom({
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages, partnerIsTyping]);
+  }, [messages, partnerIsTyping, incomingSaveRequest]);
 
   useEffect(() => {
     // 1. Listen for inbound decrypted messages
@@ -189,6 +202,12 @@ export function ChatRoom({
                 <Lock className="w-2.5 h-2.5" />
                 <span>E2EE Active</span>
               </span>
+              {isMutualSaved && (
+                <span className="hidden sm:inline-flex items-center gap-1 text-[10px] text-coral font-bold bg-coral/10 px-2 py-0.5 rounded-full">
+                  <BookmarkCheck className="w-3 h-3" />
+                  <span>Saved</span>
+                </span>
+              )}
             </div>
             <p className="text-[10px] sm:text-[11px] text-neutral-500 dark:text-neutral-400 font-medium truncate">
               {partnerIsTyping ? (
@@ -204,14 +223,31 @@ export function ChatRoom({
 
         {/* Action Controls */}
         <div className="flex items-center gap-1 sm:gap-2 shrink-0">
-          <button
-            onClick={onOpenSaveModal}
-            title="Save Stranger"
-            className="inline-flex items-center gap-1 px-2.5 sm:px-3.5 py-1.5 rounded-full text-[11px] sm:text-xs font-semibold bg-coral-light dark:bg-coral-dark/30 text-coral dark:text-[#fca5a5] hover:bg-coral hover:text-white transition-all shadow-xs active:scale-95 shrink-0"
-          >
-            <Bookmark className="w-3.5 h-3.5" />
-            <span className="hidden sm:inline">Save Stranger</span>
-          </button>
+          {isMutualSaved ? (
+            <div className="inline-flex items-center gap-1 px-2.5 sm:px-3.5 py-1.5 rounded-full text-[11px] sm:text-xs font-semibold bg-[#e8f7ee] dark:bg-[#162e22] text-[#2d5e3f] dark:text-[#86efac] select-none shrink-0">
+              <BookmarkCheck className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">Mutually Saved</span>
+            </div>
+          ) : (
+            <button
+              onClick={onOpenSaveModal}
+              disabled={isSaveRequestPending}
+              title={isSaveRequestPending ? 'Save Request Sent' : 'Save Stranger'}
+              className="inline-flex items-center gap-1 px-2.5 sm:px-3.5 py-1.5 rounded-full text-[11px] sm:text-xs font-semibold bg-coral-light dark:bg-coral-dark/30 text-coral dark:text-[#fca5a5] hover:bg-coral hover:text-white transition-all shadow-xs active:scale-95 shrink-0 disabled:opacity-60"
+            >
+              {isSaveRequestPending ? (
+                <>
+                  <Clock className="w-3.5 h-3.5 animate-spin" />
+                  <span className="hidden sm:inline">Request Sent</span>
+                </>
+              ) : (
+                <>
+                  <Bookmark className="w-3.5 h-3.5" />
+                  <span className="hidden sm:inline">Save Stranger</span>
+                </>
+              )}
+            </button>
+          )}
 
           <button
             onClick={onNextStranger}
@@ -244,6 +280,15 @@ export function ChatRoom({
 
       {/* 2. Scrollable Message Container (Only this region scrolls) */}
       <div className="flex-1 min-h-0 overflow-y-auto p-4 sm:p-6 space-y-3">
+        {/* In-chat Save Request Notification banner */}
+        {incomingSaveRequest && onAcceptSaveRequest && onDeclineSaveRequest && (
+          <SaveRequestNotification
+            requesterDisplayName={incomingSaveRequest.requesterDisplayName}
+            onAccept={onAcceptSaveRequest}
+            onDecline={onDeclineSaveRequest}
+          />
+        )}
+
         <div className="text-center my-3 space-y-1 select-none">
           <div className="inline-flex items-center gap-1.5 px-3 sm:px-4 py-1 rounded-full bg-[#e8f7ee] dark:bg-[#162e22] text-[11px] sm:text-xs font-semibold text-[#2d5e3f] dark:text-[#86efac]">
             <ShieldCheck className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-emerald-500" />

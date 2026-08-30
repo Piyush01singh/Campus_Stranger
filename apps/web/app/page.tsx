@@ -2,10 +2,11 @@
 
 import React, { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { User, ArrowRight, Lock, EyeOff, Users } from 'lucide-react';
+import { User, ArrowRight, Lock, EyeOff, Users, Play, RefreshCw } from 'lucide-react';
 import { Navbar } from '../components/Navbar';
 import { SaveStrangerModal } from '../components/SaveStrangerModal';
 import { apiClient } from '../lib/api-client';
+import { socketClient } from '../lib/socket-client';
 import { IUser } from '@campus-stranger/shared-types';
 
 export default function HomePage() {
@@ -19,15 +20,22 @@ export default function HomePage() {
     apiClient.getMe().then((u) => setCurrentUser(u));
   }, []);
 
-  const handleStartChat = async (e: React.FormEvent) => {
+  const handleResumeChat = () => {
+    router.push('/chat');
+  };
+
+  const handleStartNewChat = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     try {
-      if (!currentUser) {
-        const guest = await apiClient.createGuest(nickname.trim() || undefined);
-        setCurrentUser(guest.user);
-      }
-      router.push(`/chat${nickname ? `?nickname=${encodeURIComponent(nickname.trim())}` : ''}`);
+      // Starting a new guest chat: clear old token to establish a fresh identity
+      apiClient.clearToken();
+      socketClient.disconnect();
+
+      const guest = await apiClient.createGuest(nickname.trim() || undefined);
+      setCurrentUser(guest.user);
+
+      router.push(`/chat${nickname.trim() ? `?nickname=${encodeURIComponent(nickname.trim())}` : ''}`);
     } catch (err) {
       console.error('Failed to initiate guest chat:', err);
     } finally {
@@ -35,10 +43,18 @@ export default function HomePage() {
     }
   };
 
+  const handleLogout = () => {
+    setCurrentUser(null);
+  };
+
   return (
     <div className="min-h-screen flex flex-col justify-between bg-background text-foreground transition-colors selection:bg-coral-light selection:text-coral-dark overflow-x-hidden">
       {/* 1. Header Navigation */}
-      <Navbar user={currentUser} onOpenAuthModal={() => setAuthModalOpen(true)} />
+      <Navbar
+        user={currentUser}
+        onOpenAuthModal={() => setAuthModalOpen(true)}
+        onLogout={handleLogout}
+      />
 
       {/* 2. Hero & Central Presentation */}
       <main className="flex-1 flex flex-col items-center justify-center px-4 py-6 sm:py-8 max-w-4xl mx-auto w-full">
@@ -101,9 +117,34 @@ export default function HomePage() {
           </div>
         </div>
 
-        {/* 3. Hero Nickname Pill Input */}
+        {/* 3. Session Resume Banner if existing session found */}
+        {currentUser && (
+          <div className="w-full max-w-[470px] mb-4 p-3.5 rounded-2xl bg-amber-50 dark:bg-neutral-800/80 border border-amber-200/60 dark:border-neutral-700 flex items-center justify-between gap-3 animate-in fade-in">
+            <div className="flex items-center gap-2 min-w-0">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+              <div className="min-w-0">
+                <p className="text-xs font-bold text-neutral-900 dark:text-neutral-100 truncate">
+                  Active session as <span className="text-coral">{currentUser.displayName}</span>
+                </p>
+                <p className="text-[10px] text-neutral-500 capitalize">
+                  {currentUser.accountType} session
+                </p>
+              </div>
+            </div>
+
+            <button
+              onClick={handleResumeChat}
+              className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full bg-coral hover:bg-coral-hover text-white text-xs font-bold transition-all shadow-sm active:scale-95 shrink-0"
+            >
+              <Play className="w-3 h-3 fill-current" />
+              <span>Resume</span>
+            </button>
+          </div>
+        )}
+
+        {/* 4. Hero Nickname Pill Input / New Chat form */}
         <form
-          onSubmit={handleStartChat}
+          onSubmit={handleStartNewChat}
           className="w-full max-w-[470px] h-14 sm:h-16 rounded-full bg-white dark:bg-neutral-900 border border-[#e5e3de] dark:border-neutral-800 shadow-[0_4px_20px_-4px_rgba(0,0,0,0.05)] dark:shadow-none flex items-center px-4 sm:px-5 gap-3 transition-all focus-within:ring-2 focus-within:ring-coral/40 focus-within:border-coral"
         >
           <User className="w-5 h-5 text-neutral-400 dark:text-neutral-500 shrink-0 ml-0.5" strokeWidth={1.75} />
@@ -113,7 +154,7 @@ export default function HomePage() {
             type="text"
             value={nickname}
             onChange={(e) => setNickname(e.target.value)}
-            placeholder="Pick a nickname"
+            placeholder={currentUser ? 'Or pick a new nickname...' : 'Pick a nickname'}
             maxLength={24}
             disabled={loading}
             className="flex-1 bg-transparent border-none outline-none text-neutral-900 dark:text-neutral-100 placeholder:text-neutral-400 dark:placeholder:text-neutral-500 text-sm sm:text-base font-normal min-w-0"
@@ -122,19 +163,24 @@ export default function HomePage() {
           <button
             type="submit"
             disabled={loading}
-            aria-label="Start Anonymous Chat"
+            aria-label={currentUser ? 'Start New Chat with New Nickname' : 'Start Anonymous Chat'}
+            title={currentUser ? 'Start fresh with this nickname' : 'Start chat'}
             className="w-10 h-10 sm:w-11 sm:h-11 rounded-full bg-coral hover:bg-coral-hover active:scale-95 text-white flex items-center justify-center shadow-md shadow-coral/25 transition-all shrink-0 disabled:opacity-50"
           >
-            <ArrowRight className="w-4 h-4 sm:w-5 sm:h-5 stroke-[2.5]" />
+            {loading ? (
+              <RefreshCw className="w-4 h-4 animate-spin" />
+            ) : (
+              <ArrowRight className="w-4 h-4 sm:w-5 sm:h-5 stroke-[2.5]" />
+            )}
           </button>
         </form>
 
-        {/* 4. Sub-descriptor Text */}
+        {/* 5. Sub-descriptor Text */}
         <p className="text-[10px] sm:text-[11px] font-semibold tracking-[0.25em] text-neutral-500 dark:text-neutral-400 uppercase mt-3.5 mb-8 sm:mb-10 select-none text-center">
           ANONYMOUS &nbsp;•&nbsp; ENCRYPTED &nbsp;•&nbsp; JUST CHAT
         </p>
 
-        {/* 5. Three Minimalist Feature Blocks (Cohesive Group) */}
+        {/* 6. Three Minimalist Feature Blocks (Cohesive Group) */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-6 sm:gap-8 md:gap-10 w-full max-w-lg mx-auto text-center select-none">
           {/* Feature 1: Sage green circle */}
           <div className="flex flex-col items-center">
@@ -183,7 +229,7 @@ export default function HomePage() {
         </div>
       </main>
 
-      {/* 6. Save Stranger / Auth Modal */}
+      {/* 7. Save Stranger / Auth Modal */}
       <SaveStrangerModal
         isOpen={authModalOpen}
         onClose={() => setAuthModalOpen(false)}

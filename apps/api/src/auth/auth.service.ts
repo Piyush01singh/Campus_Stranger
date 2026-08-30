@@ -138,15 +138,73 @@ export class AuthService {
 
   /**
    * Decodes and validates optional state parameter from OAuth redirect.
+   * Supports raw JWT or base64/base64url JSON { token, conversationId }.
+   */
+  extractStateData(state?: string): { userId?: UserId; conversationId?: string } {
+    if (!state) return {};
+
+    // 1. Direct JWT verification first
+    try {
+      const decoded = this.jwtService.verify(state);
+      if (decoded?.sub) {
+        return { userId: toUserId(decoded.sub) };
+      }
+    } catch {
+      // Not a valid standalone JWT, proceed to JSON parsing
+    }
+
+    // 2. Direct JSON string check
+    if (state.startsWith('{')) {
+      try {
+        const parsed = JSON.parse(state);
+        const token = parsed.token || parsed.t;
+        const conversationId = parsed.conversationId || parsed.c;
+        let userId: UserId | undefined;
+        if (token) {
+          try {
+            const decoded = this.jwtService.verify(token);
+            if (decoded?.sub) userId = toUserId(decoded.sub);
+          } catch {
+            // Token inside JSON state is not valid
+          }
+        }
+        return { userId, conversationId };
+      } catch {
+        // Not valid JSON string
+      }
+    }
+
+    // 3. Base64 / base64url encoded JSON check
+    try {
+      const buf = Buffer.from(state, 'base64');
+      const decodedStr = buf.toString('utf-8');
+      if (decodedStr.startsWith('{')) {
+        const parsed = JSON.parse(decodedStr);
+        const token = parsed.token || parsed.t;
+        const conversationId = parsed.conversationId || parsed.c;
+        let userId: UserId | undefined;
+        if (token) {
+          try {
+            const decoded = this.jwtService.verify(token);
+            if (decoded?.sub) userId = toUserId(decoded.sub);
+          } catch {
+            // Token inside decoded JSON state is not valid
+          }
+        }
+        return { userId, conversationId };
+      }
+    } catch {
+      // Base64 decoding failed
+    }
+
+    return {};
+  }
+
+  /**
+   * Decodes and validates optional state parameter from OAuth redirect.
    */
   extractUserIdFromState(state?: string): UserId | null {
-    if (!state) return null;
-    try {
-      // If state is a raw JWT or user ID token
-      const decoded = this.jwtService.verify(state);
-      return decoded?.sub ? toUserId(decoded.sub) : null;
-    } catch {
-      return null;
-    }
+    return this.extractStateData(state).userId || null;
   }
 }
+

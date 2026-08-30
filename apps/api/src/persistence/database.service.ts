@@ -11,6 +11,7 @@ import {
   IGuestSession,
   IReport,
   ISavedConnection,
+  ISaveRequest,
   IUser,
   MessageId,
   toAuthAccountId,
@@ -37,6 +38,8 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
   private readonly memSavedConnections = new Map<string, Map<string, ISavedConnection>>();
   private readonly memBlocks = new Map<string, Set<string>>();
   private readonly memReports: IReport[] = [];
+  private readonly memSaveRequests = new Map<string, ISaveRequest>(); // id → request
+
 
   constructor(private readonly configService: ConfigService) {}
 
@@ -223,6 +226,20 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
       );
       CREATE INDEX IF NOT EXISTS idx_reports_reported ON reports(reported_user_id);
       CREATE INDEX IF NOT EXISTS idx_reports_reporter ON reports(reporter_id);
+
+      CREATE TABLE IF NOT EXISTS save_requests (
+        id VARCHAR(64) PRIMARY KEY,
+        conversation_id VARCHAR(64) NOT NULL REFERENCES conversations(id) ON DELETE CASCADE,
+        requester_user_id VARCHAR(64) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        target_user_id VARCHAR(64) NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        status VARCHAR(20) NOT NULL DEFAULT 'pending',
+        created_at TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+        responded_at TIMESTAMP WITH TIME ZONE,
+        CONSTRAINT uq_save_request_conv_requester UNIQUE (conversation_id, requester_user_id)
+      );
+      CREATE INDEX IF NOT EXISTS idx_save_requests_conv ON save_requests(conversation_id);
+      CREATE INDEX IF NOT EXISTS idx_save_requests_target ON save_requests(target_user_id);
+      CREATE INDEX IF NOT EXISTS idx_save_requests_requester ON save_requests(requester_user_id);
     `;
     await client.query(ddl);
   }
@@ -890,4 +907,389 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
     this.memReports.push(report);
     return report;
   }
+
+  // --- Save Requests (Mutual Consent) ---
+
+  /**
+   * Creates a save request from requester to target for a conversation.
+   * Idempotent: if a pending request already exists from this requester in this conversation,
+   * returns the existing request without creating a duplicate.
+   */
+  async createOrGetSaveRequest(
+    conversationId: ConversationId,
+    requesterUserId: UserId,
+    targetUserId: UserId,
+  ): Promise<ISaveRequest> {
+    const now = new Date().toISOString();
+    const id = `sreq_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+
+    if (!this.useInMemory && this.pool) {
+      // Try to find existing pending/accepted request first
+      const existing = await this.pool.query(
+        `SELECT * FROM save_requests
+         WHERE conversation_id = $1 AND requester_user_id = $2
+         ORDER BY created_at DESC LIMIT 1`,
+        [conversationId, requesterUserId],
+      );
+      if (existing.rows.length > 0) {
+        const row = existing.rows[0];
+        return {
+          id: row.id,
+          conversationId: toConversationId(row.conversation_id),
+          requesterUserId: toUserId(row.requester_user_id),
+          targetUserId: toUserId(row.target_user_id),
+          status: row.status,
+          createdAt: row.created_at.toISOString ? row.created_at.toISOString() : row.created_at,
+          respondedAt: row.responded_at
+            ? row.responded_at.toISOString
+              ? row.responded_at.toISOString()
+              : row.responded_at
+            : undefined,
+        };
+      }
+
+      await this.pool.query(
+        `INSERT INTO save_requests (id, conversation_id, requester_user_id, target_user_id, status, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (conversation_id, requester_user_id) DO NOTHING`,
+        [id, conversationId, requesterUserId, targetUserId, 'pending', now],
+      );
+
+      // Fetch the just-inserted (or conflicting existing) row
+      const result = await this.pool.query(
+        `SELECT * FROM save_requests WHERE conversation_id = $1 AND requester_user_id = $2 LIMIT 1`,
+        [conversationId, requesterUserId],
+      );
+      const row = result.rows[0];
+      return {
+        id: row.id,
+        conversationId: toConversationId(row.conversation_id),
+        requesterUserId: toUserId(row.requester_user_id),
+        targetUserId: toUserId(row.target_user_id),
+        status: row.status,
+        createdAt: row.created_at.toISOString ? row.created_at.toISOString() : row.created_at,
+        respondedAt: row.responded_at
+          ? row.responded_at.toISOString
+            ? row.responded_at.toISOString()
+            : row.responded_at
+          : undefined,
+      };
+    }
+
+    // In-memory: check for existing
+    for (const req of this.memSaveRequests.values()) {
+      if (req.conversationId === conversationId && req.requesterUserId === requesterUserId) {
+        return req;
+      }
+    }
+    const req: ISaveRequest = {
+      id,
+      conversationId,
+      requesterUserId,
+      targetUserId,
+      status: 'pending',
+      createdAt: now,
+    };
+    this.memSaveRequests.set(id, req);
+    return req;
+  }
+
+  /**
+   * Responds to a pending save request.
+   * Only the target user may respond. Validates ownership.
+   * On acceptance, atomically creates saved_connections for both participants.
+   * Returns null if request not found or already responded.
+   */
+  async respondToSaveRequest(
+    requestId: string,
+    respondingUserId: UserId,
+    response: 'accepted' | 'declined',
+  ): Promise<ISaveRequest | null> {
+    const now = new Date().toISOString();
+
+    if (!this.useInMemory && this.pool) {
+      const existing = await this.pool.query(
+        `SELECT * FROM save_requests WHERE id = $1`,
+        [requestId],
+      );
+      if (existing.rows.length === 0) return null;
+
+      const row = existing.rows[0];
+      // Authorization: only the target user may respond
+      if (row.target_user_id !== respondingUserId) return null;
+      // Idempotent: if already in terminal state, return current state
+      if (row.status !== 'pending') {
+        return {
+          id: row.id,
+          conversationId: toConversationId(row.conversation_id),
+          requesterUserId: toUserId(row.requester_user_id),
+          targetUserId: toUserId(row.target_user_id),
+          status: row.status,
+          createdAt: row.created_at.toISOString ? row.created_at.toISOString() : row.created_at,
+          respondedAt: row.responded_at
+            ? row.responded_at.toISOString
+              ? row.responded_at.toISOString()
+              : row.responded_at
+            : undefined,
+        };
+      }
+
+      const client = await this.pool.connect();
+      try {
+        await client.query('BEGIN');
+
+        await client.query(
+          `UPDATE save_requests SET status = $1, responded_at = $2 WHERE id = $3`,
+          [response, now, requestId],
+        );
+
+        if (response === 'accepted') {
+          const convId = row.conversation_id;
+          const requesterId = row.requester_user_id;
+          const targetId = row.target_user_id;
+
+          // Create saved_connections for requester
+          const scId1 = `sc_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
+          await client.query(
+            `INSERT INTO saved_connections (id, user_id, conversation_id, target_user_id, saved_at)
+             VALUES ($1, $2, $3, $4, $5)
+             ON CONFLICT (user_id, conversation_id) DO UPDATE SET saved_at = $5`,
+            [scId1, requesterId, convId, targetId, now],
+          );
+
+          // Create saved_connections for target
+          const scId2 = `sc_${Date.now()}_r${Math.random().toString(36).substring(2, 9)}`;
+          await client.query(
+            `INSERT INTO saved_connections (id, user_id, conversation_id, target_user_id, saved_at)
+             VALUES ($1, $2, $3, $4, $5)
+             ON CONFLICT (user_id, conversation_id) DO UPDATE SET saved_at = $5`,
+            [scId2, targetId, convId, requesterId, now],
+          );
+
+          // Update conversation_members.saved_at for both
+          await client.query(
+            `UPDATE conversation_members SET saved_at = $1
+             WHERE conversation_id = $2 AND user_id IN ($3, $4)`,
+            [now, convId, requesterId, targetId],
+          );
+        }
+
+        await client.query('COMMIT');
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      } finally {
+        client.release();
+      }
+
+      const updated = await this.pool.query(`SELECT * FROM save_requests WHERE id = $1`, [requestId]);
+      const updRow = updated.rows[0];
+      return {
+        id: updRow.id,
+        conversationId: toConversationId(updRow.conversation_id),
+        requesterUserId: toUserId(updRow.requester_user_id),
+        targetUserId: toUserId(updRow.target_user_id),
+        status: updRow.status,
+        createdAt: updRow.created_at.toISOString ? updRow.created_at.toISOString() : updRow.created_at,
+        respondedAt: updRow.responded_at
+          ? updRow.responded_at.toISOString
+            ? updRow.responded_at.toISOString()
+            : updRow.responded_at
+          : now,
+      };
+    }
+
+    // In-memory fallback
+    const req = this.memSaveRequests.get(requestId);
+    if (!req) return null;
+    if (req.targetUserId !== respondingUserId) return null;
+    if (req.status !== 'pending') return req;
+
+    req.status = response;
+    req.respondedAt = now;
+
+    if (response === 'accepted') {
+      // Create both saved connections
+      await this.saveStrangerConnection(req.requesterUserId, req.conversationId);
+      await this.saveStrangerConnection(req.targetUserId, req.conversationId);
+    }
+
+    return req;
+  }
+
+  /**
+   * Returns a pending save request targeting the given user in the given conversation.
+   * Used for reconnect synchronization.
+   */
+  async getPendingSaveRequestForConversation(
+    conversationId: ConversationId,
+    targetUserId: UserId,
+  ): Promise<ISaveRequest | null> {
+    if (!this.useInMemory && this.pool) {
+      const res = await this.pool.query(
+        `SELECT * FROM save_requests
+         WHERE conversation_id = $1 AND target_user_id = $2 AND status = 'pending'
+         ORDER BY created_at DESC LIMIT 1`,
+        [conversationId, targetUserId],
+      );
+      if (res.rows.length === 0) return null;
+      const row = res.rows[0];
+      return {
+        id: row.id,
+        conversationId: toConversationId(row.conversation_id),
+        requesterUserId: toUserId(row.requester_user_id),
+        targetUserId: toUserId(row.target_user_id),
+        status: row.status,
+        createdAt: row.created_at.toISOString ? row.created_at.toISOString() : row.created_at,
+      };
+    }
+
+    for (const req of this.memSaveRequests.values()) {
+      if (
+        req.conversationId === conversationId &&
+        req.targetUserId === targetUserId &&
+        req.status === 'pending'
+      ) {
+        return req;
+      }
+    }
+    return null;
+  }
+
+  /**
+   * Cancels all pending save requests for a conversation.
+   * Called when a conversation ends before mutual consent is reached.
+   */
+  async cancelPendingSaveRequests(conversationId: ConversationId): Promise<ISaveRequest[]> {
+    const now = new Date().toISOString();
+
+    if (!this.useInMemory && this.pool) {
+      const res = await this.pool.query(
+        `UPDATE save_requests SET status = 'cancelled', responded_at = $1
+         WHERE conversation_id = $2 AND status = 'pending'
+         RETURNING *`,
+        [now, conversationId],
+      );
+      return res.rows.map((row) => ({
+        id: row.id,
+        conversationId: toConversationId(row.conversation_id),
+        requesterUserId: toUserId(row.requester_user_id),
+        targetUserId: toUserId(row.target_user_id),
+        status: 'cancelled' as const,
+        createdAt: row.created_at.toISOString ? row.created_at.toISOString() : row.created_at,
+        respondedAt: now,
+      }));
+    }
+
+    const cancelled: ISaveRequest[] = [];
+    for (const req of this.memSaveRequests.values()) {
+      if (req.conversationId === conversationId && req.status === 'pending') {
+        req.status = 'cancelled';
+        req.respondedAt = now;
+        cancelled.push(req);
+      }
+    }
+    return cancelled;
+  }
+
+  /**
+   * Mutually deletes a saved connection for both participants in a conversation.
+   * Also deletes all encrypted message rows (Option A: full server-side erasure).
+   * Only a current participant may trigger this deletion.
+   */
+  async deleteMutualSavedConnection(
+    conversationId: ConversationId,
+    requestingUserId: UserId,
+  ): Promise<{ deleted: boolean; otherUserId: UserId | null }> {
+    if (!this.useInMemory && this.pool) {
+      // Verify requester is a member of the conversation
+      const memberCheck = await this.pool.query(
+        `SELECT user_id FROM conversation_members WHERE conversation_id = $1 AND user_id = $2`,
+        [conversationId, requestingUserId],
+      );
+      if (memberCheck.rows.length === 0) {
+        return { deleted: false, otherUserId: null };
+      }
+
+      // Find the other participant
+      const otherMember = await this.pool.query(
+        `SELECT user_id FROM conversation_members WHERE conversation_id = $1 AND user_id != $2 LIMIT 1`,
+        [conversationId, requestingUserId],
+      );
+      const otherUserId: UserId | null =
+        otherMember.rows.length > 0 ? toUserId(otherMember.rows[0].user_id) : null;
+
+      const client = await this.pool.connect();
+      try {
+        await client.query('BEGIN');
+
+        // Delete both saved connections
+        await client.query(
+          `DELETE FROM saved_connections WHERE conversation_id = $1`,
+          [conversationId],
+        );
+
+        // Delete all encrypted messages for the conversation (Option A)
+        await client.query(
+          `DELETE FROM messages WHERE conversation_id = $1`,
+          [conversationId],
+        );
+
+        // Mark conversation as deleted
+        await client.query(
+          `UPDATE conversations SET status = 'deleted' WHERE id = $1`,
+          [conversationId],
+        );
+
+        // Cancel any pending save requests
+        await client.query(
+          `UPDATE save_requests SET status = 'cancelled', responded_at = NOW()
+           WHERE conversation_id = $1 AND status = 'pending'`,
+          [conversationId],
+        );
+
+        await client.query('COMMIT');
+      } catch (err) {
+        await client.query('ROLLBACK');
+        throw err;
+      } finally {
+        client.release();
+      }
+
+      return { deleted: true, otherUserId };
+    }
+
+    // In-memory fallback
+    const members = await this.getConversationMembers(conversationId);
+    const isMember = members.some((m) => m.userId === requestingUserId);
+    if (!isMember) return { deleted: false, otherUserId: null };
+
+    const otherMember = members.find((m) => m.userId !== requestingUserId);
+    const otherUserId = otherMember?.userId ?? null;
+
+    // Remove saved connections for both
+    for (const savedMap of this.memSavedConnections.values()) {
+      if (savedMap.has(conversationId)) {
+        savedMap.delete(conversationId);
+      }
+    }
+
+    // Delete messages
+    this.memMessages.delete(conversationId);
+
+    // Mark conversation deleted
+    const conv = this.memConversations.get(conversationId);
+    if (conv) conv.status = 'deleted';
+
+    // Cancel pending save requests
+    for (const req of this.memSaveRequests.values()) {
+      if (req.conversationId === conversationId && req.status === 'pending') {
+        req.status = 'cancelled';
+        req.respondedAt = new Date().toISOString();
+      }
+    }
+
+    return { deleted: true, otherUserId };
+  }
 }
+
