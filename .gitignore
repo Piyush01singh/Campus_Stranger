@@ -39,3 +39,6 @@ Thumbs.db
 *.tsbuildinfo
 .eslintcache
 .neon
+
+.vercel
+.env*
