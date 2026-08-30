@@ -33,6 +33,18 @@ export default function SavedStrangersPage() {
             apiClient.setToken(authToken);
             window.history.replaceState({}, '', '/saved');
           }
+
+          const pendingConv = sessionStorage.getItem('pending_save_conv');
+          if (pendingConv) {
+            const pendingAlias = sessionStorage.getItem('pending_save_alias') || undefined;
+            sessionStorage.removeItem('pending_save_conv');
+            sessionStorage.removeItem('pending_save_alias');
+            try {
+              await apiClient.saveConversation(pendingConv, pendingAlias);
+            } catch (saveErr) {
+              console.warn('Could not auto-save pending conversation:', saveErr);
+            }
+          }
         }
 
         const user = await apiClient.getMe();

@@ -12,6 +12,12 @@ export class GoogleAuthGuard extends AuthGuard('google') {
     super();
   }
 
+  getAuthenticateOptions(context: ExecutionContext) {
+    const req = context.switchToHttp().getRequest();
+    const state = req.query?.state || req.query?.token;
+    return state ? { state: String(state) } : {};
+  }
+
   canActivate(context: ExecutionContext) {
     const clientId = this.configService.get<string>('google.clientId');
     const clientSecret = this.configService.get<string>('google.clientSecret');

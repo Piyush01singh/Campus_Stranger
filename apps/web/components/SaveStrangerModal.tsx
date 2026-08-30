@@ -24,25 +24,28 @@ export function SaveStrangerModal({
 
   if (!isOpen) return null;
 
-  const handleMockGoogleAuth = async () => {
+  const handleGoogleAuth = async () => {
     setLoading(true);
     setError(null);
     try {
-      const googleId = `google_${Date.now()}`;
-      const email = `student_${Math.floor(1000 + Math.random() * 9000)}@university.edu`;
-      const res = await apiClient.mockLinkGoogle(googleId, email, 'Verified Student');
-
       if (conversationId) {
-        await apiClient.saveConversation(conversationId, alias.trim() || undefined);
+        try {
+          await apiClient.saveConversation(conversationId, alias.trim() || undefined);
+        } catch {
+          // Store in sessionStorage to ensure it is saved upon return if guest permissions differ
+          if (typeof window !== 'undefined') {
+            sessionStorage.setItem('pending_save_conv', conversationId);
+            if (alias.trim()) sessionStorage.setItem('pending_save_alias', alias.trim());
+          }
+        }
       }
 
-      if (onSuccess) {
-        onSuccess(res.user);
+      const googleUrl = apiClient.getGoogleOAuthUrl();
+      if (typeof window !== 'undefined') {
+        window.location.href = googleUrl;
       }
-      onClose();
     } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to authenticate');
-    } finally {
+      setError(err instanceof Error ? err.message : 'Failed to initiate Google authentication');
       setLoading(false);
     }
   };
@@ -108,12 +111,12 @@ export function SaveStrangerModal({
 
         <div className="space-y-2.5 pt-2">
           <button
-            onClick={handleMockGoogleAuth}
+            onClick={handleGoogleAuth}
             disabled={loading}
             className="w-full py-3.5 px-5 rounded-full bg-coral hover:bg-coral-hover active:scale-95 text-white font-semibold text-sm transition-all flex items-center justify-center gap-2 shadow-md shadow-coral/25 disabled:opacity-50"
           >
             <Sparkles className="w-4 h-4" />
-            <span>{loading ? 'Linking account...' : 'Continue with Google'}</span>
+            <span>{loading ? 'Redirecting to Google...' : 'Continue with Google'}</span>
           </button>
         </div>
       </div>
