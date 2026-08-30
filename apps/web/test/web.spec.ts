@@ -48,15 +48,8 @@ describe('apps/web workspace, packages, and theme utilities', () => {
     expect(urlWithToken).toBe('https://campus-stranger.onrender.com/api/auth/google?state=sample_guest_jwt_token');
   });
 
-  it('should reject mockLinkGoogle when NODE_ENV is production', async () => {
-    const mockLinkCheck = (env: string) => {
-      if (env === 'production') {
-        throw new Error('Mock Google authentication linking is strictly disabled in production. Use standard OAuth 2.0 flow.');
-      }
-      return true;
-    };
-
-    expect(() => mockLinkCheck('production')).toThrowError(/strictly disabled in production/);
-    expect(mockLinkCheck('development')).toBe(true);
+  it('should exclusively provide real Google OAuth initiation and zero mock-link methods', () => {
+    expect((apiClient as unknown as Record<string, unknown>).mockLinkGoogle).toBeUndefined();
+    expect(typeof apiClient.getGoogleOAuthUrl).toBe('function');
   });
 });

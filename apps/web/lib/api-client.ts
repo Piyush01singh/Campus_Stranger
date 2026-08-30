@@ -81,25 +81,6 @@ class ApiClient {
     return `${API_BASE}/api/auth/google${token ? `?state=${encodeURIComponent(token)}` : ''}`;
   }
 
-  async mockLinkGoogle(
-    googleId: string,
-    email?: string,
-    displayName?: string,
-  ): Promise<{ user: IUser; accessToken: string }> {
-    if (process.env.NODE_ENV === 'production') {
-      throw new Error('Mock Google authentication linking is strictly disabled in production. Use standard OAuth 2.0 flow.');
-    }
-    const res = await fetch(`${API_BASE}/api/auth/google/mock-link`, {
-      method: 'POST',
-      headers: this.getHeaders(),
-      body: JSON.stringify({ googleId, email, displayName }),
-    });
-    if (!res.ok) throw new Error('Failed to link Google account');
-    const json: IApiSuccessResponse<{ user: IUser; accessToken: string }> = await res.json();
-    this.setToken(json.data.accessToken);
-    return json.data;
-  }
-
   async getSavedStrangers(): Promise<ISavedStrangerView[]> {
     const res = await fetch(`${API_BASE}/api/conversations/saved`, {
       headers: this.getHeaders(),
