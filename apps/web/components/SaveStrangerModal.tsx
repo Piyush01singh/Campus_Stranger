@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { User, X, Sparkles, CheckCircle2, ShieldCheck } from 'lucide-react';
+import { User, X, CheckCircle2, ShieldCheck } from 'lucide-react';
 import { apiClient } from '../lib/api-client';
 import { IUser } from '@campus-stranger/shared-types';
 
@@ -109,7 +109,6 @@ export function SaveStrangerModal({
             disabled={loading}
             className="w-full py-3.5 px-5 rounded-full bg-neutral-900 hover:bg-neutral-800 dark:bg-neutral-100 dark:hover:bg-neutral-200 text-white dark:text-neutral-900 font-semibold text-sm transition-all flex items-center justify-center gap-2 shadow-md active:scale-95 disabled:opacity-50"
           >
-            <Sparkles className="w-4 h-4 text-amber-400" />
             <span>{loading ? 'Redirecting to Google...' : 'Continue with Google'}</span>
           </button>
 

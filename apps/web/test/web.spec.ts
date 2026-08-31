@@ -40,22 +40,18 @@ describe('apps/web workspace, packages, and theme utilities', () => {
     expect(normalizeWsUrl('https://campus-stranger.onrender.com', 'https://campus-stranger.onrender.com/api')).toBe('https://campus-stranger.onrender.com');
   });
 
-  it('should generate valid Google OAuth URL with state token and optional conversationId for account linking', () => {
+  it('should generate valid Google OAuth URL with optional returnUrl for post-auth routing', () => {
     const urlWithoutToken = apiClient.getGoogleOAuthUrl();
-    expect(urlWithoutToken).toContain('/api/auth/google');
+    expect(urlWithoutToken).toBe('http://localhost:3001/api/auth/google');
 
-    const urlWithToken = apiClient.getGoogleOAuthUrl('sample_guest_jwt_token');
-    expect(urlWithToken).toContain('state=sample_guest_jwt_token');
-
-    const urlWithConv = apiClient.getGoogleOAuthUrl('sample_token', 'conv_abc');
-    expect(urlWithConv).toContain('state=');
-    // Decode base64url state
-    const urlParams = new URL(urlWithConv).searchParams;
+    const urlWithReturn = apiClient.getGoogleOAuthUrl(undefined, undefined, '/saved');
+    expect(urlWithReturn).toContain('state=');
+    // Decode base64 state
+    const urlParams = new URL(urlWithReturn).searchParams;
     const stateParam = urlParams.get('state');
     expect(stateParam).toBeDefined();
     const decoded = JSON.parse(atob(stateParam!));
-    expect(decoded.token).toBe('sample_token');
-    expect(decoded.conversationId).toBe('conv_abc');
+    expect(decoded.returnUrl).toBe('/saved');
   });
 
   it('should exclusively provide real Google OAuth initiation and zero mock-link methods', () => {

@@ -95,22 +95,14 @@ class ApiClient {
     }
   }
 
-  getGoogleOAuthUrl(guestToken?: string, conversationId?: string, returnUrl?: string): string {
-    const token = guestToken || this.getToken();
-    if (!token && !conversationId && !returnUrl) {
+  getGoogleOAuthUrl(_guestToken?: string, _conversationId?: string, returnUrl?: string): string {
+    if (!returnUrl) {
       return `${API_BASE}/api/auth/google`;
     }
 
-    if (conversationId || returnUrl) {
-      const stateObj: { token?: string; conversationId?: string; returnUrl?: string } = {};
-      if (token) stateObj.token = token;
-      if (conversationId) stateObj.conversationId = conversationId;
-      if (returnUrl) stateObj.returnUrl = returnUrl;
-      const stateStr = btoa(JSON.stringify(stateObj));
-      return `${API_BASE}/api/auth/google?state=${encodeURIComponent(stateStr)}`;
-    }
-
-    return `${API_BASE}/api/auth/google${token ? `?state=${encodeURIComponent(token)}` : ''}`;
+    const stateObj: { returnUrl?: string } = { returnUrl };
+    const stateStr = btoa(JSON.stringify(stateObj));
+    return `${API_BASE}/api/auth/google?state=${encodeURIComponent(stateStr)}`;
   }
 
   /**

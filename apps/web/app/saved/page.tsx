@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Bookmark, MessageSquare, Trash2, ArrowLeft, Lock, Users, Sparkles, AlertTriangle } from 'lucide-react';
+import { Bookmark, MessageSquare, Trash2, ArrowLeft, Lock, Users, AlertTriangle } from 'lucide-react';
 import { Navbar } from '../../components/Navbar';
 import { SaveStrangerModal } from '../../components/SaveStrangerModal';
 import { apiClient } from '../../lib/api-client';
@@ -150,7 +150,6 @@ export default function SavedChatsPage() {
                 onClick={() => setAuthModalOpen(true)}
                 className="inline-flex items-center gap-2 px-6 py-3 rounded-full bg-neutral-900 hover:bg-neutral-800 dark:bg-neutral-100 dark:hover:bg-neutral-200 text-white dark:text-neutral-900 font-semibold text-xs sm:text-sm shadow-md transition-all active:scale-95"
               >
-                <Sparkles className="w-4 h-4 text-amber-400" />
                 <span>Sign In with Google</span>
               </button>
             </div>

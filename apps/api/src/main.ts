@@ -10,6 +10,9 @@ async function bootstrap() {
   const logger = new Logger('Bootstrap');
   const app = await NestFactory.create(AppModule);
 
+  // Trust reverse proxy (Render, Cloudflare, etc.) for HTTPS and secure cookies
+  app.getHttpAdapter().getInstance().set('trust proxy', 1);
+
   // Enable graceful shutdown lifecycle hooks (SIGTERM / SIGINT)
   app.enableShutdownHooks();
 

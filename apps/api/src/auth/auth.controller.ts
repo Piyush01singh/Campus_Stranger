@@ -173,31 +173,11 @@ export class AuthController {
 
       const stateData = stateParam ? this.authService.extractStateData(stateParam) : {};
 
-      // Identify guest userId from OAuth state OR from incoming cs_auth_token cookie
-      let guestUserId = stateData.userId;
-      if (!guestUserId) {
-        const rawCookie = req.cookies?.cs_auth_token || req.headers?.cookie;
-        if (rawCookie) {
-          const cookieMatch = typeof rawCookie === 'string' && rawCookie.includes('cs_auth_token=')
-            ? rawCookie.match(/(?:^|;\s*)cs_auth_token=([^;]+)/)?.[1]
-            : req.cookies?.cs_auth_token;
-          if (cookieMatch) {
-            const decodedFromCookie = this.authService.extractStateData(cookieMatch);
-            if (decodedFromCookie.userId) {
-              guestUserId = decodedFromCookie.userId;
-            }
-          }
-        }
-      }
-
-      const session = await this.authService.findOrCreateGoogleUser(
-        {
-          id: req.user.googleId,
-          email: req.user.email,
-          displayName: req.user.displayName,
-        },
-        guestUserId,
-      );
+      const session = await this.authService.findOrCreateGoogleUser({
+        id: req.user.googleId,
+        email: req.user.email,
+        displayName: req.user.displayName,
+      });
 
       this.logger.log(
         `Google OAuth authenticated successfully for user ${session.user.displayName} (${session.user.id})`,
@@ -212,11 +192,7 @@ export class AuthController {
         path: '/',
       });
 
-      if (stateData.conversationId) {
-        return res.redirect(
-          `${frontendUrl}/chat?return_conv=${encodeURIComponent(stateData.conversationId)}`,
-        );
-      } else if (stateData.returnUrl) {
+      if (stateData.returnUrl) {
         return res.redirect(`${frontendUrl}${stateData.returnUrl}`);
       } else {
         return res.redirect(`${frontendUrl}/`);

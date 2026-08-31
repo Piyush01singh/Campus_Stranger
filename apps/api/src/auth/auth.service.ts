@@ -100,12 +100,7 @@ export class AuthService {
    */
   async findOrCreateGoogleUser(
     googleProfile: { id: string; email?: string; displayName?: string },
-    currentGuestUserId?: UserId,
   ): Promise<AuthSessionResponse> {
-    if (currentGuestUserId) {
-      return this.linkGoogleAccount(currentGuestUserId, googleProfile);
-    }
-
     const existingAuth = await this.db.findAuthAccount('google', googleProfile.id);
     if (existingAuth) {
       const existingUser = await this.db.findUserById(existingAuth.userId);
