@@ -14,6 +14,7 @@ import {
   IWsMatchFoundPayload,
   IWsSaveRequestReceivedPayload,
   ReportReason,
+  toConversationId,
 } from '@campus-stranger/shared-types';
 
 function ChatContent() {
@@ -58,17 +59,28 @@ function ChatContent() {
         if (!isMounted) return;
         setCurrentUser(user);
 
-        // Connect socket and join queue
+        // Connect socket
         await socketClient.connect();
 
-        // If returned from OAuth for saving a specific conversation
-        if (returnConvParam && user.accountType === 'authenticated') {
-          socketClient.sendSaveRequest(returnConvParam);
-          setIsSaveRequestPending(true);
-        }
+        // If returned from OAuth for saving a specific active conversation
+        if (returnConvParam) {
+          const convId = toConversationId(returnConvParam);
+          setActiveConversation({
+            conversationId: convId,
+            partnerDisplayName: 'Stranger',
+            matchedAt: new Date().toISOString(),
+          });
+          setMatchState('matched');
+          socketClient.sync(convId);
 
-        await socketClient.joinMatchmaking();
-        setMatchState('searching');
+          if (user.accountType === 'authenticated') {
+            socketClient.sendSaveRequest(convId);
+            setIsSaveRequestPending(true);
+          }
+        } else {
+          await socketClient.joinMatchmaking();
+          setMatchState('searching');
+        }
       } catch (err) {
         console.error('Error in chat initialization:', err);
       }
@@ -118,6 +130,13 @@ function ChatContent() {
       setIsSaveRequestPending(false);
     });
 
+    // 7. Listen for sync completed to restore pending save requests
+    const unsubSync = socketClient.onSyncCompleted((payload) => {
+      if (payload.pendingSaveRequest) {
+        setIncomingSaveRequest(payload.pendingSaveRequest);
+      }
+    });
+
     return () => {
       isMounted = false;
       unsubMatch();
@@ -126,6 +145,7 @@ function ChatContent() {
       unsubSaveAccept();
       unsubSaveDecline();
       unsubSaveCancel();
+      unsubSync();
       socketClient.leaveMatchmaking();
     };
   }, [nicknameParam, authTokenParam, returnConvParam]);
@@ -188,7 +208,7 @@ function ChatContent() {
   };
 
   return (
-    <div className="h-screen max-h-[100dvh] flex flex-col overflow-hidden bg-background text-foreground transition-colors selection:bg-coral-light selection:text-coral-dark">
+    <div className="min-h-[100dvh] h-[100dvh] max-h-[100dvh] flex flex-col overflow-hidden bg-background text-foreground transition-colors selection:bg-coral-light selection:text-coral-dark">
       <Navbar
         user={currentUser}
         onOpenAuthModal={() => setSaveModalOpen(true)}
@@ -281,7 +301,7 @@ export default function ChatPage() {
   return (
     <Suspense
       fallback={
-        <div className="h-screen flex items-center justify-center bg-background text-foreground text-xs text-neutral-400">
+        <div className="h-[100dvh] flex items-center justify-center bg-background text-foreground text-xs text-neutral-400">
           Loading Campus Chat...
         </div>
       }

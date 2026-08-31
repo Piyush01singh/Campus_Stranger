@@ -107,6 +107,8 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
       await this.client.sadd(`cs:presence:${userId}`, socketId);
       await this.client.expire(`cs:presence:${userId}`, 86400); // 24h
       await this.client.set(`cs:socket:${socketId}`, userId, 'EX', 86400);
+      await this.client.sadd('cs:active_users', userId);
+      await this.client.expire('cs:active_users', 86400);
       return;
     }
     let sockets = this.memPresence.get(userId);
@@ -121,6 +123,10 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
     if (this.isConnected && this.client) {
       await this.client.srem(`cs:presence:${userId}`, socketId);
       await this.client.del(`cs:socket:${socketId}`);
+      const remainingSockets = await this.client.scard(`cs:presence:${userId}`);
+      if (remainingSockets === 0) {
+        await this.client.srem('cs:active_users', userId);
+      }
       return;
     }
     const sockets = this.memPresence.get(userId);
@@ -143,6 +149,18 @@ export class RedisService implements OnModuleInit, OnModuleDestroy {
   async isUserOnline(userId: UserId): Promise<boolean> {
     const sockets = await this.getUserSockets(userId);
     return sockets.length > 0;
+  }
+
+  /**
+   * Returns the count of platform-wide unique active users.
+   * Counts unique people/user entities rather than raw duplicate sockets or tabs.
+   */
+  async getActiveUserCount(): Promise<number> {
+    if (this.isConnected && this.client) {
+      const count = await this.client.scard('cs:active_users');
+      return Math.max(count, 0);
+    }
+    return this.memPresence.size;
   }
 
   // --- Distributed Matchmaking Queue ---

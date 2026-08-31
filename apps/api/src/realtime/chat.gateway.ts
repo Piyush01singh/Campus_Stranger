@@ -79,6 +79,11 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   async handleConnection(client: AuthenticatedSocket) {
     this.logger.log(`Socket client connected: ${client.id}`);
+    const activeCount = await this.redis.getActiveUserCount();
+    client.emit(WsServerEvents.ACTIVE_USERS_COUNT, {
+      count: activeCount,
+      timestamp: new Date().toISOString(),
+    });
   }
 
   async handleDisconnect(client: AuthenticatedSocket) {
@@ -95,6 +100,13 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
           this.userSockets.delete(user.id);
         }
       }
+
+      // Broadcast updated active users count to all connected clients
+      const activeCount = await this.redis.getActiveUserCount();
+      this.server.emit(WsServerEvents.ACTIVE_USERS_COUNT, {
+        count: activeCount,
+        timestamp: new Date().toISOString(),
+      });
 
       // Notify active conversation partner if disconnected
       if (client.data.activeConversationId) {
@@ -152,6 +164,13 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
           accountType: user.accountType,
         });
 
+        // Broadcast updated active users count to all connected clients
+        const activeCount = await this.redis.getActiveUserCount();
+        this.server.emit(WsServerEvents.ACTIVE_USERS_COUNT, {
+          count: activeCount,
+          timestamp: new Date().toISOString(),
+        });
+
         this.logger.log(`Authenticated socket ${client.id} for user ${user.displayName} (${user.id})`);
       } catch (err) {
         this.logger.warn(`Authentication failed for socket ${client.id}: ${err}`);
@@ -161,6 +180,15 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
     client.data.authPromise = authPromise;
     await authPromise;
+  }
+
+  @SubscribeMessage(WsClientEvents.GET_ACTIVE_USERS)
+  async handleGetActiveUsers(@ConnectedSocket() client: AuthenticatedSocket) {
+    const count = await this.redis.getActiveUserCount();
+    client.emit(WsServerEvents.ACTIVE_USERS_COUNT, {
+      count,
+      timestamp: new Date().toISOString(),
+    });
   }
 
   // --- 2. Matchmaking Queue ---

@@ -148,6 +148,37 @@ describe('Production PostgreSQL & Redis Persistence Suite', () => {
       expect(await redis.isUserOnline(user.id)).toBe(false);
     });
 
+    it('should track unique platform-wide active user count deduplicated across multi-device/multi-tab sockets', async () => {
+      const userA = await db.createUser('UniqueUserA', 'guest');
+      const userB = await db.createUser('UniqueUserB', 'authenticated');
+
+      const initialCount = await redis.getActiveUserCount();
+
+      // User A connects Tab 1
+      await redis.registerSocket(userA.id, 'sock_a_tab1');
+      expect(await redis.getActiveUserCount()).toBe(initialCount + 1);
+
+      // User A connects Tab 2 (same user, count must not increment)
+      await redis.registerSocket(userA.id, 'sock_a_tab2');
+      expect(await redis.getActiveUserCount()).toBe(initialCount + 1);
+
+      // User B connects Phone
+      await redis.registerSocket(userB.id, 'sock_b_phone');
+      expect(await redis.getActiveUserCount()).toBe(initialCount + 2);
+
+      // User A closes Tab 1 (Tab 2 still open, count must not decrement)
+      await redis.unregisterSocket(userA.id, 'sock_a_tab1');
+      expect(await redis.getActiveUserCount()).toBe(initialCount + 2);
+
+      // User A closes Tab 2 (User A offline, count decrements by 1)
+      await redis.unregisterSocket(userA.id, 'sock_a_tab2');
+      expect(await redis.getActiveUserCount()).toBe(initialCount + 1);
+
+      // User B disconnects Phone (User B offline, count decrements by 1)
+      await redis.unregisterSocket(userB.id, 'sock_b_phone');
+      expect(await redis.getActiveUserCount()).toBe(initialCount);
+    });
+
     it('should handle distributed matchmaking queue operations', async () => {
       const candidate1 = {
         userId: toUserId('usr_redis_1'),

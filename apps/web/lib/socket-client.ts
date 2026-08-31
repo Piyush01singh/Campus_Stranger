@@ -49,6 +49,7 @@ export type SaveDeclinedCallback = (payload: IWsSaveDeclinedPayload) => void;
 export type SaveCancelledCallback = (payload: IWsSaveCancelledPayload) => void;
 export type SaveDeletedCallback = (payload: IWsSaveDeletedPayload) => void;
 export type SyncCompletedCallback = (payload: IWsSyncCompletedPayload) => void;
+export type ActiveUsersCountCallback = (count: number) => void;
 
 class SocketClient {
   private socket: Socket | null = null;
@@ -67,6 +68,7 @@ class SocketClient {
   private onSaveCancelledListeners: Set<SaveCancelledCallback> = new Set();
   private onSaveDeletedListeners: Set<SaveDeletedCallback> = new Set();
   private onSyncCompletedListeners: Set<SyncCompletedCallback> = new Set();
+  private onActiveUsersCountListeners: Set<ActiveUsersCountCallback> = new Set();
 
   connect(): Promise<Socket> {
     if (this.socket && this.socket.connected && this.isAuthenticated) {
@@ -230,6 +232,10 @@ class SocketClient {
     this.socket.on(WsServerEvents.SYNC_COMPLETED, (payload: IWsSyncCompletedPayload) => {
       this.onSyncCompletedListeners.forEach((cb) => cb(payload));
     });
+
+    this.socket.on(WsServerEvents.ACTIVE_USERS_COUNT, (payload: { count: number }) => {
+      this.onActiveUsersCountListeners.forEach((cb) => cb(payload.count));
+    });
   }
 
   async joinMatchmaking() {
@@ -378,6 +384,15 @@ class SocketClient {
   onSyncCompleted(cb: SyncCompletedCallback) {
     this.onSyncCompletedListeners.add(cb);
     return () => this.onSyncCompletedListeners.delete(cb);
+  }
+
+  onActiveUsersCount(cb: ActiveUsersCountCallback) {
+    this.onActiveUsersCountListeners.add(cb);
+    return () => this.onActiveUsersCountListeners.delete(cb);
+  }
+
+  requestActiveUsersCount() {
+    this.socket?.emit(WsClientEvents.GET_ACTIVE_USERS);
   }
 
   disconnect() {

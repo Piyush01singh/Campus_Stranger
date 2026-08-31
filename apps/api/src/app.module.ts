@@ -9,6 +9,7 @@ import { ConversationsModule } from './conversations/conversations.module';
 import { ModerationModule } from './moderation/moderation.module';
 import { MatchmakingModule } from './matchmaking/matchmaking.module';
 import { RealtimeModule } from './realtime/realtime.module';
+import { PresenceModule } from './presence/presence.module';
 
 @Module({
   imports: [
@@ -25,6 +26,7 @@ import { RealtimeModule } from './realtime/realtime.module';
     MatchmakingModule,
     RealtimeModule,
     HealthModule,
+    PresenceModule,
   ],
 })
 export class AppModule {}

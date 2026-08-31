@@ -88,7 +88,7 @@ export default function SavedStrangersPage() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-background text-foreground transition-colors selection:bg-coral-light selection:text-coral-dark">
+    <div className="min-h-[100dvh] flex flex-col bg-background text-foreground transition-colors selection:bg-coral-light selection:text-coral-dark">
       <Navbar
         user={currentUser}
         onOpenAuthModal={() => setAuthModalOpen(true)}
@@ -237,9 +237,10 @@ export default function SavedStrangersPage() {
         <div
           role="dialog"
           aria-modal="true"
+          aria-label="Delete Saved Conversation"
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-in fade-in"
         >
-          <div className="relative w-full max-w-md p-6 rounded-3xl bg-white dark:bg-neutral-900 border border-[#e5e3de] dark:border-neutral-800 shadow-2xl space-y-4">
+          <div className="relative w-full max-w-md max-h-[90dvh] overflow-y-auto p-6 rounded-3xl bg-white dark:bg-neutral-900 border border-[#e5e3de] dark:border-neutral-800 shadow-2xl space-y-4">
             <div className="flex items-center gap-3 text-red-600 dark:text-red-400">
               <div className="w-10 h-10 rounded-full bg-red-100 dark:bg-red-950/50 flex items-center justify-center shrink-0">
                 <AlertTriangle className="w-5 h-5" />

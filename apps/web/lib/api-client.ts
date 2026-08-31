@@ -90,6 +90,19 @@ class ApiClient {
     }
   }
 
+  async getActiveUserCount(): Promise<number> {
+    try {
+      const res = await fetch(`${API_BASE}/api/presence/active-users`, {
+        headers: this.getHeaders(),
+      });
+      if (!res.ok) return 0;
+      const json: IApiSuccessResponse<{ count: number }> = await res.json();
+      return json.data.count;
+    } catch {
+      return 0;
+    }
+  }
+
   getGoogleOAuthUrl(guestToken?: string, conversationId?: string): string {
     const token = guestToken || this.getToken();
     if (!token && !conversationId) {

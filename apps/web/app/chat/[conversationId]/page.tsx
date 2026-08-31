@@ -9,7 +9,11 @@ import { BlockReportModal } from '../../../components/BlockReportModal';
 import { apiClient } from '../../../lib/api-client';
 import { socketClient } from '../../../lib/socket-client';
 import { cryptoManager } from '../../../lib/crypto-manager';
-import { IUser, ReportReason } from '@campus-stranger/shared-types';
+import {
+  IUser,
+  IWsSaveRequestReceivedPayload,
+  ReportReason,
+} from '@campus-stranger/shared-types';
 
 export default function ResumedChatPage() {
   const router = useRouter();
@@ -20,6 +24,11 @@ export default function ResumedChatPage() {
   const [partnerDisplayName] = useState('Saved Stranger');
   const [initialMessages, setInitialMessages] = useState<ChatMessage[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // Mutual save state
+  const [incomingSaveRequest, setIncomingSaveRequest] = useState<IWsSaveRequestReceivedPayload | null>(null);
+  const [isMutualSaved, setIsMutualSaved] = useState(true);
+  const [isSaveRequestPending, setIsSaveRequestPending] = useState(false);
 
   const [saveModalOpen, setSaveModalOpen] = useState(false);
   const [blockModalOpen, setBlockModalOpen] = useState(false);
@@ -92,6 +101,7 @@ export default function ResumedChatPage() {
 
         // Connect socket & sync
         await socketClient.connect();
+        socketClient.sync(conversationId);
       } catch (err) {
         console.error('Failed to load resumed chat:', err);
       } finally {
@@ -100,6 +110,34 @@ export default function ResumedChatPage() {
     }
 
     loadResumedConversation();
+
+    const unsubSaveReq = socketClient.onSaveRequestReceived((payload) => {
+      setIncomingSaveRequest(payload);
+    });
+
+    const unsubSaveAccept = socketClient.onSaveAccepted(() => {
+      setIsMutualSaved(true);
+      setIncomingSaveRequest(null);
+      setIsSaveRequestPending(false);
+    });
+
+    const unsubSaveDecline = socketClient.onSaveDeclined(() => {
+      setIncomingSaveRequest(null);
+      setIsSaveRequestPending(false);
+    });
+
+    const unsubSync = socketClient.onSyncCompleted((payload) => {
+      if (payload.pendingSaveRequest) {
+        setIncomingSaveRequest(payload.pendingSaveRequest);
+      }
+    });
+
+    return () => {
+      unsubSaveReq();
+      unsubSaveAccept();
+      unsubSaveDecline();
+      unsubSync();
+    };
   }, [conversationId, router]);
 
   const handleNextStranger = () => {
@@ -119,9 +157,36 @@ export default function ResumedChatPage() {
     }
   };
 
+  const handleSendSaveRequest = () => {
+    if (conversationId) {
+      socketClient.sendSaveRequest(conversationId);
+      setIsSaveRequestPending(true);
+    }
+  };
+
+  const handleAcceptSaveRequest = () => {
+    if (conversationId) {
+      socketClient.respondToSaveRequest(conversationId, 'accepted');
+    }
+  };
+
+  const handleDeclineSaveRequest = () => {
+    if (conversationId) {
+      socketClient.respondToSaveRequest(conversationId, 'declined');
+      setIncomingSaveRequest(null);
+    }
+  };
+
   return (
-    <div className="h-screen max-h-[100dvh] flex flex-col overflow-hidden bg-background text-foreground transition-colors selection:bg-coral-light selection:text-coral-dark">
-      <Navbar user={currentUser} />
+    <div className="min-h-[100dvh] h-[100dvh] max-h-[100dvh] flex flex-col overflow-hidden bg-background text-foreground transition-colors selection:bg-coral-light selection:text-coral-dark">
+      <Navbar
+        user={currentUser}
+        onOpenAuthModal={() => setSaveModalOpen(true)}
+        onLogout={() => {
+          setCurrentUser(null);
+          router.push('/');
+        }}
+      />
 
       <main className="flex-1 flex flex-col min-h-0 overflow-hidden w-full">
         {loading ? (
@@ -136,6 +201,11 @@ export default function ResumedChatPage() {
             conversationId={conversationId}
             partnerDisplayName={partnerDisplayName}
             initialMessages={initialMessages}
+            incomingSaveRequest={incomingSaveRequest}
+            isMutualSaved={isMutualSaved}
+            isSaveRequestPending={isSaveRequestPending}
+            onAcceptSaveRequest={handleAcceptSaveRequest}
+            onDeclineSaveRequest={handleDeclineSaveRequest}
             onNextStranger={handleNextStranger}
             onOpenSaveModal={() => setSaveModalOpen(true)}
             onOpenBlockModal={() => setBlockModalOpen(true)}
@@ -148,6 +218,10 @@ export default function ResumedChatPage() {
         isOpen={saveModalOpen}
         onClose={() => setSaveModalOpen(false)}
         conversationId={conversationId}
+        currentUser={currentUser}
+        partnerDisplayName={partnerDisplayName}
+        onSendSaveRequest={handleSendSaveRequest}
+        isSaveRequestPending={isSaveRequestPending}
         onSuccess={(u) => setCurrentUser(u)}
       />
 

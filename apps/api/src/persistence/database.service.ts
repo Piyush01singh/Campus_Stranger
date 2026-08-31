@@ -240,6 +240,7 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
       CREATE INDEX IF NOT EXISTS idx_save_requests_conv ON save_requests(conversation_id);
       CREATE INDEX IF NOT EXISTS idx_save_requests_target ON save_requests(target_user_id);
       CREATE INDEX IF NOT EXISTS idx_save_requests_requester ON save_requests(requester_user_id);
+      CREATE UNIQUE INDEX IF NOT EXISTS uq_save_request_conv_requester ON save_requests(conversation_id, requester_user_id);
     `;
     await client.query(ddl);
   }

@@ -18,7 +18,7 @@ export function AboutModal({ isOpen, onClose }: AboutModalProps) {
       aria-labelledby="about-modal-title"
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm animate-in fade-in"
     >
-      <div className="relative w-full max-w-lg p-6 sm:p-8 rounded-3xl bg-white dark:bg-neutral-900 border border-[#e5e3de] dark:border-neutral-800 shadow-2xl space-y-6 text-foreground">
+      <div className="relative w-full max-w-lg max-h-[90dvh] overflow-y-auto p-6 sm:p-8 rounded-3xl bg-white dark:bg-neutral-900 border border-[#e5e3de] dark:border-neutral-800 shadow-2xl space-y-6 text-foreground">
         <button
           onClick={onClose}
           aria-label="Close modal"

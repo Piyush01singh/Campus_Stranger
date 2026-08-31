@@ -19,6 +19,8 @@ export const WsClientEvents = {
   SAVE_REQUEST: 'save:request',
   /** Mutual Save Respond: User B accepts or declines a pending save request */
   SAVE_RESPOND: 'save:respond',
+  /** Request active users count */
+  GET_ACTIVE_USERS: 'active_users:get',
 } as const;
 
 export type WsClientEventType = (typeof WsClientEvents)[keyof typeof WsClientEvents];
@@ -46,6 +48,8 @@ export const WsServerEvents = {
   SAVE_CANCELLED: 'save:cancelled',
   /** Delivered to both users when a saved connection is mutually deleted */
   SAVE_DELETED: 'save:deleted',
+  /** Real-time platform-wide unique active users count update */
+  ACTIVE_USERS_COUNT: 'active_users:count',
 } as const;
 
 export type WsServerEventType = (typeof WsServerEvents)[keyof typeof WsServerEvents];
@@ -216,4 +220,11 @@ export interface IWsSaveDeletedPayload {
   /** Display name of the user who initiated deletion */
   deletedByDisplayName: string;
 }
+
+/** Server → Client: Real-time platform-wide unique active users count */
+export interface IWsActiveUsersCountPayload {
+  count: number;
+  timestamp: string;
+}
+
 
