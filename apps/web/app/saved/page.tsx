@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Bookmark, MessageSquare, Trash2, ArrowLeft, Lock, Users, AlertTriangle } from 'lucide-react';
 import { Navbar } from '../../components/Navbar';
 import { SaveStrangerModal } from '../../components/SaveStrangerModal';
+import { GoogleSignInButton } from '../../components/GoogleSignInButton';
 import { apiClient } from '../../lib/api-client';
 import { socketClient } from '../../lib/socket-client';
 import { IUser } from '@campus-stranger/shared-types';
@@ -146,12 +147,12 @@ export default function SavedChatsPage() {
             </div>
 
             <div className="pt-2">
-              <button
-                onClick={() => setAuthModalOpen(true)}
-                className="inline-flex items-center gap-2 px-6 py-3 rounded-full bg-neutral-900 hover:bg-neutral-800 dark:bg-neutral-100 dark:hover:bg-neutral-200 text-white dark:text-neutral-900 font-semibold text-xs sm:text-sm shadow-md transition-all active:scale-95"
-              >
-                <span>Sign In with Google</span>
-              </button>
+              <GoogleSignInButton
+                returnUrl="/saved"
+                label="Sign In with Google"
+                loadingLabel="Signing in..."
+                className="px-6 py-3 text-xs sm:text-sm shadow-md"
+              />
             </div>
           </div>
         ) : savedList.length === 0 ? (

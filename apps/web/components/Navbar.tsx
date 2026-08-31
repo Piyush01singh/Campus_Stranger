@@ -7,6 +7,7 @@ import { Sun, Moon, User as UserIcon, LogOut, Bookmark, ChevronDown } from 'luci
 import { IUser } from '@campus-stranger/shared-types';
 import { useTheme } from './theme-provider';
 import { AboutModal } from './AboutModal';
+import { GoogleSignInButton } from './GoogleSignInButton';
 import { apiClient } from '../lib/api-client';
 import { socketClient } from '../lib/socket-client';
 
@@ -185,24 +186,32 @@ export function Navbar({ user, onOpenAuthModal, onLogout }: NavbarProps) {
                       <span>Saved Chats</span>
                     </Link>
 
-                    {user.accountType === 'guest' && onOpenAuthModal && (
-                      <button
-                        onClick={() => {
-                          setDropdownOpen(false);
-                          onOpenAuthModal();
-                        }}
-                        className="w-full text-left flex items-center gap-2 px-3.5 py-2 text-coral hover:bg-coral-light/20 dark:hover:bg-coral-dark/20 transition-colors font-medium"
-                      >
-                        <UserIcon className="w-3.5 h-3.5" />
-                        <span>Sign in with Google</span>
-                      </button>
+                    {user.accountType === 'guest' && (
+                      onOpenAuthModal ? (
+                        <button
+                          onClick={() => {
+                            setDropdownOpen(false);
+                            onOpenAuthModal();
+                          }}
+                          className="w-full text-left flex items-center gap-2 px-3.5 py-2 text-coral hover:bg-coral-light/20 dark:hover:bg-coral-dark/20 transition-colors font-medium text-xs cursor-pointer"
+                        >
+                          <UserIcon className="w-3.5 h-3.5 shrink-0" />
+                          <span>Sign in with Google</span>
+                        </button>
+                      ) : (
+                        <GoogleSignInButton
+                          variant="dropdown"
+                          label="Sign in with Google"
+                          onClick={() => setDropdownOpen(false)}
+                        />
+                      )
                     )}
 
                     <div className="border-t border-[#e5e3de]/60 dark:border-neutral-800 my-1" />
 
                     <button
                       onClick={handleLogout}
-                      className="w-full text-left flex items-center gap-2 px-3.5 py-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors font-semibold"
+                      className="w-full text-left flex items-center gap-2 px-3.5 py-2 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors font-semibold cursor-pointer"
                     >
                       <LogOut className="w-3.5 h-3.5" />
                       <span>Log Out</span>
@@ -211,13 +220,20 @@ export function Navbar({ user, onOpenAuthModal, onLogout }: NavbarProps) {
                 )}
               </div>
             ) : (
-              onOpenAuthModal && (
+              onOpenAuthModal ? (
                 <button
                   onClick={onOpenAuthModal}
-                  className="px-3.5 sm:px-5 py-1 sm:py-1.5 sm:py-2 rounded-full bg-neutral-900 hover:bg-neutral-800 dark:bg-neutral-100 dark:hover:bg-neutral-200 text-white dark:text-neutral-900 text-[11px] sm:text-xs sm:text-sm font-semibold transition-all shadow-xs active:scale-95 shrink-0"
+                  className="px-3.5 sm:px-5 py-1 sm:py-1.5 sm:py-2 rounded-full bg-neutral-900 hover:bg-neutral-800 dark:bg-neutral-100 dark:hover:bg-neutral-200 text-white dark:text-neutral-900 text-[11px] sm:text-xs sm:text-sm font-semibold transition-all shadow-xs active:scale-95 shrink-0 cursor-pointer"
                 >
                   Sign In
                 </button>
+              ) : (
+                <GoogleSignInButton
+                  variant="navbar"
+                  size="sm"
+                  label="Sign In"
+                  showIcon={false}
+                />
               )
             )}
 

@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { User, X, CheckCircle2, ShieldCheck } from 'lucide-react';
+import { GoogleSignInButton } from './GoogleSignInButton';
 import { apiClient } from '../lib/api-client';
 import { IUser } from '@campus-stranger/shared-types';
 
@@ -18,30 +19,15 @@ export function SaveStrangerModal({
   currentUser: _currentUser,
   onSuccess,
 }: SaveStrangerModalProps) {
-  const [loading, setLoading] = useState(false);
+  const [devLoading, setDevLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   if (!isOpen) return null;
 
   const isDev = process.env.NODE_ENV !== 'production';
 
-  const handleGoogleAuth = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const returnUrl = typeof window !== 'undefined' ? window.location.pathname : undefined;
-      const googleUrl = apiClient.getGoogleOAuthUrl(undefined, undefined, returnUrl);
-      if (typeof window !== 'undefined') {
-        window.location.href = googleUrl;
-      }
-    } catch (err: unknown) {
-      setError(err instanceof Error ? err.message : 'Failed to initiate Google authentication');
-      setLoading(false);
-    }
-  };
-
   const handleDevTestLogin = async (name: string, email: string) => {
-    setLoading(true);
+    setDevLoading(true);
     setError(null);
     try {
       const res = await apiClient.testLogin(name, email);
@@ -54,9 +40,11 @@ export function SaveStrangerModal({
       }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Dev test login failed');
-      setLoading(false);
+      setDevLoading(false);
     }
   };
+
+  const returnUrl = typeof window !== 'undefined' ? window.location.pathname : undefined;
 
   return (
     <div
@@ -104,13 +92,14 @@ export function SaveStrangerModal({
         {error && <p className="text-xs text-red-500 text-center font-medium">{error}</p>}
 
         <div className="space-y-3 pt-2">
-          <button
-            onClick={handleGoogleAuth}
-            disabled={loading}
-            className="w-full py-3.5 px-5 rounded-full bg-neutral-900 hover:bg-neutral-800 dark:bg-neutral-100 dark:hover:bg-neutral-200 text-white dark:text-neutral-900 font-semibold text-sm transition-all flex items-center justify-center gap-2 shadow-md active:scale-95 disabled:opacity-50"
-          >
-            <span>{loading ? 'Redirecting to Google...' : 'Continue with Google'}</span>
-          </button>
+          <GoogleSignInButton
+            fullWidth
+            size="lg"
+            label="Sign In with Google"
+            loadingLabel="Signing in..."
+            returnUrl={returnUrl}
+            onError={(errMsg) => setError(errMsg)}
+          />
 
           {isDev && (
             <div className="pt-3 border-t border-neutral-200 dark:border-neutral-800 space-y-2">
@@ -120,14 +109,14 @@ export function SaveStrangerModal({
               <div className="grid grid-cols-2 gap-2">
                 <button
                   onClick={() => handleDevTestLogin('Alice Cooper', 'alice@campus.local')}
-                  disabled={loading}
+                  disabled={devLoading}
                   className="py-2.5 px-3 rounded-full bg-coral-light dark:bg-coral-dark/30 text-coral dark:text-[#fca5a5] hover:bg-coral hover:text-white font-semibold text-xs transition-all text-center disabled:opacity-50"
                 >
                   Login as Alice
                 </button>
                 <button
                   onClick={() => handleDevTestLogin('Bob Dylan', 'bob@campus.local')}
-                  disabled={loading}
+                  disabled={devLoading}
                   className="py-2.5 px-3 rounded-full bg-coral-light dark:bg-coral-dark/30 text-coral dark:text-[#fca5a5] hover:bg-coral hover:text-white font-semibold text-xs transition-all text-center disabled:opacity-50"
                 >
                   Login as Bob
