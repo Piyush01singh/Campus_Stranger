@@ -1,6 +1,6 @@
 'use client';
 
-import React, { Suspense, useEffect, useState } from 'react';
+import React, { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Navbar } from '../../components/Navbar';
 import { MatchmakingView } from '../../components/MatchmakingView';
@@ -39,14 +39,35 @@ function ChatContent() {
   const [blockModalOpen, setBlockModalOpen] = useState(false);
   const [reportModalOpen, setReportModalOpen] = useState(false);
 
+  const isInitializedRef = useRef(false);
+
   useEffect(() => {
+    if (isInitializedRef.current) return;
+    isInitializedRef.current = true;
+
     let isMounted = true;
 
     async function initUserAndMatch() {
       try {
+        let currentAuthToken = authTokenParam;
+        let currentReturnConv = returnConvParam;
+
+        if (typeof window !== 'undefined') {
+          const urlParams = new URLSearchParams(window.location.search);
+          if (!currentAuthToken && urlParams.get('auth_token')) {
+            currentAuthToken = urlParams.get('auth_token');
+          }
+          if (!currentReturnConv && urlParams.get('return_conv')) {
+            currentReturnConv = urlParams.get('return_conv');
+          }
+        }
+
         // Handle OAuth callback redirect token if present
-        if (authTokenParam) {
-          apiClient.setToken(authTokenParam);
+        if (currentAuthToken) {
+          apiClient.setToken(currentAuthToken);
+        }
+
+        if (typeof window !== 'undefined' && (currentAuthToken || currentReturnConv)) {
           window.history.replaceState({}, '', '/chat');
         }
 
@@ -63,8 +84,8 @@ function ChatContent() {
         await socketClient.connect();
 
         // If returned from OAuth for saving a specific active conversation
-        if (returnConvParam) {
-          const convId = toConversationId(returnConvParam);
+        if (currentReturnConv) {
+          const convId = toConversationId(currentReturnConv);
           setActiveConversation({
             conversationId: convId,
             partnerDisplayName: 'Stranger',
@@ -212,7 +233,12 @@ function ChatContent() {
       <Navbar
         user={currentUser}
         onOpenAuthModal={() => setSaveModalOpen(true)}
-        onLogout={() => setCurrentUser(null)}
+        onLogout={async () => {
+          await apiClient.logout();
+          socketClient.disconnect();
+          setCurrentUser(null);
+          router.push('/');
+        }}
       />
 
       <main className="flex-1 flex flex-col min-h-0 overflow-hidden w-full">

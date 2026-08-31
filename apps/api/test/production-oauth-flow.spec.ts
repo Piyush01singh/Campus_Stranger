@@ -179,4 +179,29 @@ describe('Production Google OAuth Flow & Account Linking Suite', () => {
     expect(session2.user.id).toBe(session1.user.id);
     expect(session2.user.accountType).toBe('authenticated');
   });
+
+  it('7. should correctly decode OAuth state with returnUrl and guest session token', () => {
+    const guestPayload = { sub: 'usr_guest123', displayName: 'GuestTester', accountType: 'guest' };
+    const token = jwt.sign(guestPayload);
+    
+    // Test base64 JSON state with returnUrl and conversationId
+    const stateObj = { token, conversationId: 'conv_456', returnUrl: '/saved' };
+    const stateStr = Buffer.from(JSON.stringify(stateObj)).toString('base64');
+
+    const extracted = authService.extractStateData(stateStr);
+    expect(extracted.userId).toBe('usr_guest123');
+    expect(extracted.conversationId).toBe('conv_456');
+    expect(extracted.returnUrl).toBe('/saved');
+  });
+
+  it('8. should validate authenticated user from JWT token payload', async () => {
+    const user = await db.createUser('ValidatedStudent', 'authenticated');
+    const token = jwt.sign({ sub: user.id, displayName: user.displayName, accountType: user.accountType });
+
+    const decoded = jwt.verify(token) as { sub: string };
+    const retrievedUser = await authService.validateTokenUser(decoded.sub);
+    expect(retrievedUser.id).toBe(user.id);
+    expect(retrievedUser.displayName).toBe('ValidatedStudent');
+    expect(retrievedUser.accountType).toBe('authenticated');
+  });
 });

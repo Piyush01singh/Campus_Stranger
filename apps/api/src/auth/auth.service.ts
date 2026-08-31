@@ -138,9 +138,9 @@ export class AuthService {
 
   /**
    * Decodes and validates optional state parameter from OAuth redirect.
-   * Supports raw JWT or base64/base64url JSON { token, conversationId }.
+   * Supports raw JWT or base64/base64url JSON { token, conversationId, returnUrl }.
    */
-  extractStateData(state?: string): { userId?: UserId; conversationId?: string } {
+  extractStateData(state?: string): { userId?: UserId; conversationId?: string; returnUrl?: string } {
     if (!state) return {};
 
     // 1. Direct JWT verification first
@@ -159,6 +159,7 @@ export class AuthService {
         const parsed = JSON.parse(state);
         const token = parsed.token || parsed.t;
         const conversationId = parsed.conversationId || parsed.c;
+        const returnUrl = typeof parsed.returnUrl === 'string' ? parsed.returnUrl : undefined;
         let userId: UserId | undefined;
         if (token) {
           try {
@@ -168,7 +169,7 @@ export class AuthService {
             // Token inside JSON state is not valid
           }
         }
-        return { userId, conversationId };
+        return { userId, conversationId, returnUrl };
       } catch {
         // Not valid JSON string
       }
@@ -182,6 +183,7 @@ export class AuthService {
         const parsed = JSON.parse(decodedStr);
         const token = parsed.token || parsed.t;
         const conversationId = parsed.conversationId || parsed.c;
+        const returnUrl = typeof parsed.returnUrl === 'string' ? parsed.returnUrl : undefined;
         let userId: UserId | undefined;
         if (token) {
           try {
@@ -191,7 +193,7 @@ export class AuthService {
             // Token inside decoded JSON state is not valid
           }
         }
-        return { userId, conversationId };
+        return { userId, conversationId, returnUrl };
       }
     } catch {
       // Base64 decoding failed

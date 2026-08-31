@@ -37,7 +37,8 @@ export function SaveStrangerModal({
     setLoading(true);
     setError(null);
     try {
-      const googleUrl = apiClient.getGoogleOAuthUrl(undefined, conversationId);
+      const returnUrl = typeof window !== 'undefined' ? window.location.pathname : undefined;
+      const googleUrl = apiClient.getGoogleOAuthUrl(undefined, conversationId, returnUrl);
       if (typeof window !== 'undefined') {
         window.location.href = googleUrl;
       }

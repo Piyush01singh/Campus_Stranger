@@ -1,4 +1,15 @@
-import { Body, Controller, ForbiddenException, Get, Logger, Post, Req, Res, Request, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  ForbiddenException,
+  Get,
+  Logger,
+  Post,
+  Req,
+  Res,
+  Request,
+  UseGuards,
+} from '@nestjs/common';
 import type { Response } from 'express';
 import { ConfigService } from '@nestjs/config';
 import { AuthService, AuthSessionResponse } from './auth.service';
@@ -64,6 +75,35 @@ export class AuthController {
     };
   }
 
+  @UseGuards(JwtAuthGuard)
+  @Get('session')
+  async getSession(@Request() req: { user: IUser }): Promise<IApiSuccessResponse<IUser>> {
+    return {
+      success: true,
+      data: req.user,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  @Post('logout')
+  async logout(@Res() res: Response): Promise<void> {
+    const nodeEnv = this.configService.get<string>('nodeEnv', 'development');
+    const isProd = nodeEnv === 'production';
+
+    res.clearCookie('cs_auth_token', {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: isProd ? 'none' : 'lax',
+      path: '/',
+    });
+
+    res.status(200).json({
+      success: true,
+      data: { loggedOut: true },
+      timestamp: new Date().toISOString(),
+    });
+  }
+
   /**
    * Production Google OAuth 2.0 initiation.
    * Redirects user to Google Consent Screen.
@@ -77,7 +117,7 @@ export class AuthController {
 
   /**
    * Production Google OAuth 2.0 callback route.
-   * Exchanges authorization code, links/creates user, and redirects to frontend with token.
+   * Exchanges authorization code, links/creates user, sets session cookie, and redirects to frontend.
    */
   @UseGuards(GoogleAuthGuard)
   @Get('google/callback')
@@ -86,6 +126,8 @@ export class AuthController {
     @Res() res: Response,
   ) {
     const frontendUrl = this.configService.get<string>('frontendUrl', 'http://localhost:3000');
+    const nodeEnv = this.configService.get<string>('nodeEnv', 'development');
+    const isProd = nodeEnv === 'production';
 
     if (!req.user || !req.user.googleId) {
       this.logger.error('Google OAuth callback failed: Google user profile was not returned from provider');
@@ -115,12 +157,26 @@ export class AuthController {
         `Google OAuth authenticated successfully for user ${session.user.displayName} (${session.user.id})`,
       );
 
+      // Issue cross-site compatible HttpOnly session cookie
+      res.cookie('cs_auth_token', session.accessToken, {
+        httpOnly: true,
+        secure: isProd,
+        sameSite: isProd ? 'none' : 'lax',
+        maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+        path: '/',
+      });
+
+      const tokenParam = encodeURIComponent(session.accessToken);
+
       if (stateData.conversationId) {
         return res.redirect(
-          `${frontendUrl}/chat?auth_token=${encodeURIComponent(session.accessToken)}&return_conv=${encodeURIComponent(stateData.conversationId)}`,
+          `${frontendUrl}/chat?auth_token=${tokenParam}&return_conv=${encodeURIComponent(stateData.conversationId)}`,
         );
+      } else if (stateData.returnUrl) {
+        const separator = stateData.returnUrl.includes('?') ? '&' : '?';
+        return res.redirect(`${frontendUrl}${stateData.returnUrl}${separator}auth_token=${tokenParam}`);
       } else {
-        return res.redirect(`${frontendUrl}/saved?auth_token=${encodeURIComponent(session.accessToken)}`);
+        return res.redirect(`${frontendUrl}/?auth_token=${tokenParam}`);
       }
     } catch (err) {
       this.logger.error(

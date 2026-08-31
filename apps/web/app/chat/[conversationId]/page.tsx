@@ -182,7 +182,9 @@ export default function ResumedChatPage() {
       <Navbar
         user={currentUser}
         onOpenAuthModal={() => setSaveModalOpen(true)}
-        onLogout={() => {
+        onLogout={async () => {
+          await apiClient.logout();
+          socketClient.disconnect();
           setCurrentUser(null);
           router.push('/');
         }}

@@ -20,6 +20,14 @@ export default function HomePage() {
   const activeUsersCount = useActiveUsersCount(1);
 
   useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      const authToken = urlParams.get('auth_token');
+      if (authToken) {
+        apiClient.setToken(authToken);
+        window.history.replaceState({}, '', '/');
+      }
+    }
     apiClient.getMe().then((u) => setCurrentUser(u));
   }, []);
 
@@ -31,14 +39,17 @@ export default function HomePage() {
     e.preventDefault();
     setLoading(true);
     try {
-      // Clear previous guest identity when explicitly entering a fresh nickname/chat
-      if (nickname.trim() || !currentUser) {
+      if (currentUser?.accountType === 'authenticated') {
+        // Authenticated user starts chat directly with their existing identity
+        router.push('/chat');
+      } else {
+        // Guest user starts chat with nickname
         apiClient.clearToken();
         socketClient.disconnect();
         const guest = await apiClient.createGuest(nickname.trim() || undefined);
         setCurrentUser(guest.user);
+        router.push(`/chat${nickname.trim() ? `?nickname=${encodeURIComponent(nickname.trim())}` : ''}`);
       }
-      router.push(`/chat${nickname.trim() ? `?nickname=${encodeURIComponent(nickname.trim())}` : ''}`);
     } catch (err) {
       console.error('Failed to initiate chat:', err);
     } finally {
@@ -46,7 +57,9 @@ export default function HomePage() {
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await apiClient.logout();
+    socketClient.disconnect();
     setCurrentUser(null);
   };
 

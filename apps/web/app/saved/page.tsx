@@ -92,7 +92,9 @@ export default function SavedStrangersPage() {
       <Navbar
         user={currentUser}
         onOpenAuthModal={() => setAuthModalOpen(true)}
-        onLogout={() => {
+        onLogout={async () => {
+          await apiClient.logout();
+          socketClient.disconnect();
           setCurrentUser(null);
           setSavedList([]);
         }}
