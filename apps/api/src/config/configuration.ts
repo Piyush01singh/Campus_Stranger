@@ -43,7 +43,12 @@ export default (): AppConfig => ({
     clientId: cleanEnv(process.env.GOOGLE_CLIENT_ID),
     clientSecret: cleanEnv(process.env.GOOGLE_CLIENT_SECRET),
     callbackUrl:
-      cleanEnv(process.env.GOOGLE_CALLBACK_URL) || 'http://localhost:3001/api/auth/google/callback',
+      cleanEnv(process.env.GOOGLE_CALLBACK_URL) ||
+      (cleanEnv(process.env.BACKEND_URL)
+        ? `${cleanEnv(process.env.BACKEND_URL)!.replace(/\/+$/, '')}/api/auth/google/callback`
+        : cleanEnv(process.env.RENDER_EXTERNAL_URL)
+          ? `${cleanEnv(process.env.RENDER_EXTERNAL_URL)!.replace(/\/+$/, '')}/api/auth/google/callback`
+          : 'http://localhost:3001/api/auth/google/callback'),
   },
   database: {
     url: cleanEnv(process.env.DATABASE_URL),

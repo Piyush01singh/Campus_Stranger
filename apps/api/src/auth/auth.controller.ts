@@ -1,4 +1,4 @@
-import { Body, Controller, ForbiddenException, Get, Post, Req, Res, Request, UseGuards } from '@nestjs/common';
+import { Body, Controller, ForbiddenException, Get, Logger, Post, Req, Res, Request, UseGuards } from '@nestjs/common';
 import type { Response } from 'express';
 import { ConfigService } from '@nestjs/config';
 import { AuthService, AuthSessionResponse } from './auth.service';
@@ -35,6 +35,8 @@ export class MockLinkGoogleDto {
 
 @Controller('auth')
 export class AuthController {
+  private readonly logger = new Logger(AuthController.name);
+
   constructor(
     private readonly authService: AuthService,
     private readonly configService: ConfigService,
@@ -79,27 +81,52 @@ export class AuthController {
    */
   @UseGuards(GoogleAuthGuard)
   @Get('google/callback')
-  async googleAuthCallback(@Req() req: { user: GoogleValidatedUser }, @Res() res: Response) {
+  async googleAuthCallback(
+    @Req() req: { user?: GoogleValidatedUser; query?: Record<string, unknown> },
+    @Res() res: Response,
+  ) {
     const frontendUrl = this.configService.get<string>('frontendUrl', 'http://localhost:3000');
-    const stateData = req.user?.state
-      ? this.authService.extractStateData(req.user.state)
-      : {};
 
-    const session = await this.authService.findOrCreateGoogleUser(
-      {
-        id: req.user.googleId,
-        email: req.user.email,
-        displayName: req.user.displayName,
-      },
-      stateData.userId,
-    );
+    if (!req.user || !req.user.googleId) {
+      this.logger.error('Google OAuth callback failed: Google user profile was not returned from provider');
+      return res.redirect(`${frontendUrl}/?error=oauth_failed`);
+    }
 
-    if (stateData.conversationId) {
-      res.redirect(
-        `${frontendUrl}/chat?auth_token=${encodeURIComponent(session.accessToken)}&return_conv=${encodeURIComponent(stateData.conversationId)}`,
+    try {
+      const stateParam =
+        typeof req.query?.state === 'string'
+          ? req.query.state
+          : typeof req.user?.state === 'string'
+            ? req.user.state
+            : undefined;
+
+      const stateData = stateParam ? this.authService.extractStateData(stateParam) : {};
+
+      const session = await this.authService.findOrCreateGoogleUser(
+        {
+          id: req.user.googleId,
+          email: req.user.email,
+          displayName: req.user.displayName,
+        },
+        stateData.userId,
       );
-    } else {
-      res.redirect(`${frontendUrl}/saved?auth_token=${encodeURIComponent(session.accessToken)}`);
+
+      this.logger.log(
+        `Google OAuth authenticated successfully for user ${session.user.displayName} (${session.user.id})`,
+      );
+
+      if (stateData.conversationId) {
+        return res.redirect(
+          `${frontendUrl}/chat?auth_token=${encodeURIComponent(session.accessToken)}&return_conv=${encodeURIComponent(stateData.conversationId)}`,
+        );
+      } else {
+        return res.redirect(`${frontendUrl}/saved?auth_token=${encodeURIComponent(session.accessToken)}`);
+      }
+    } catch (err) {
+      this.logger.error(
+        `Error processing Google OAuth user session: ${err instanceof Error ? err.stack : err}`,
+      );
+      return res.redirect(`${frontendUrl}/?error=oauth_processing_error`);
     }
   }
 

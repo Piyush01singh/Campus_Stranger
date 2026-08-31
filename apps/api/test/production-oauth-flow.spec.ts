@@ -138,4 +138,45 @@ describe('Production Google OAuth Flow & Account Linking Suite', () => {
     const inConv = await db.isUserInConversation(conv.id, existingGoogleUser.id);
     expect(inConv).toBe(true);
   });
+
+  it('5. should authenticate new standalone Google user without active guest session or chat', async () => {
+    const googleId = `google_standalone_${Date.now()}`;
+    const session = await authService.findOrCreateGoogleUser({
+      id: googleId,
+      email: 'standalone.student@university.edu',
+      displayName: 'Standalone Student',
+    });
+
+    expect(session.user.id).toBeDefined();
+    expect(session.user.displayName).toBe('Standalone Student');
+    expect(session.user.accountType).toBe('authenticated');
+    expect(session.accessToken).toBeDefined();
+
+    // Verify token decodes correctly
+    const decoded = jwt.verify(session.accessToken);
+    expect(decoded.sub).toBe(session.user.id);
+    expect(decoded.displayName).toBe('Standalone Student');
+    expect(decoded.accountType).toBe('authenticated');
+  });
+
+  it('6. should retrieve existing standalone Google user on recurring login', async () => {
+    const googleId = `google_recurring_${Date.now()}`;
+    
+    // First login: create account
+    const session1 = await authService.findOrCreateGoogleUser({
+      id: googleId,
+      email: 'recurring.student@university.edu',
+      displayName: 'Recurring Student',
+    });
+
+    // Second login: retrieve same account
+    const session2 = await authService.findOrCreateGoogleUser({
+      id: googleId,
+      email: 'recurring.student@university.edu',
+      displayName: 'Recurring Student',
+    });
+
+    expect(session2.user.id).toBe(session1.user.id);
+    expect(session2.user.accountType).toBe('authenticated');
+  });
 });
