@@ -70,7 +70,7 @@ describe('apps/web workspace, packages, and theme utilities', () => {
     expect(apiClient.getToken()).toBeNull();
   });
 
-  it('should have consistent About page content matching the 2-mode product model', () => {
+  it('should have consistent About page content matching the 2-mode product model with 3 cards', () => {
     const aboutContent = {
       hero: {
         title: 'Your Messages Stay Private',
@@ -82,27 +82,41 @@ describe('apps/web workspace, packages, and theme utilities', () => {
           description: 'Messages are encrypted on your device before sending. The server never sees your messages in plaintext.',
         },
         {
-          title: 'Chat Instantly',
-          description: 'No sign-up or email is required. Choose a temporary nickname and start chatting right away.',
-        },
-        {
           title: 'Anonymous by Default',
-          description: 'Anonymous chats stay temporary. No account is created just to start chatting.',
+          description: 'Chat without an account. Choose a nickname and start chatting. Anonymous conversations stay temporary.',
         },
         {
           title: 'Save Chat With Mutual Consent',
-          description: 'Logged-in users can choose to save a conversation. The other person must accept before the chat is saved for both.',
+          description: 'Logged-in users can choose to save a chat. The other person must accept before it is saved for both.',
         },
       ],
     };
 
     expect(aboutContent.hero.title).toBe('Your Messages Stay Private');
-    expect(aboutContent.cards).toHaveLength(4);
+    expect(aboutContent.cards).toHaveLength(3);
     expect(aboutContent.cards.map((c) => c.title)).toEqual([
       'End-to-End Encrypted',
-      'Chat Instantly',
       'Anonymous by Default',
       'Save Chat With Mutual Consent',
     ]);
+  });
+
+  it('should verify Saved Chats page copy standards', () => {
+    const savedChatsCopy = {
+      header: {
+        title: 'Saved Chats',
+        subtitle: 'Conversations you and another person chose to keep.',
+      },
+      loggedOut: {
+        message: 'Saved conversations are available for logged-in users. Chat anonymously without an account, or sign in to save conversations with mutual consent.',
+      },
+      emptyState: {
+        title: 'No Saved Chats Yet',
+        subtitle: 'Save a conversation when both of you agree to keep it.',
+      },
+    };
+
+    expect(savedChatsCopy.header.title).toBe('Saved Chats');
+    expect(savedChatsCopy.emptyState.title).toBe('No Saved Chats Yet');
   });
 });

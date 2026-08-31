@@ -17,7 +17,7 @@ interface SavedStrangerItem {
   isMutualSaved?: boolean;
 }
 
-export default function SavedStrangersPage() {
+export default function SavedChatsPage() {
   const [currentUser, setCurrentUser] = useState<IUser | null>(null);
   const [savedList, setSavedList] = useState<SavedStrangerItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -33,15 +33,15 @@ export default function SavedStrangersPage() {
         const user = await apiClient.getMe();
         setCurrentUser(user);
 
-        if (user) {
+        if (user && user.accountType === 'authenticated') {
           const list = await apiClient.getSavedStrangers();
           setSavedList(list);
 
-          // Connect socket to receive realtime updates like mutual deletion
+          // Connect socket to receive realtime updates like deletion sync
           await socketClient.connect();
         }
       } catch (err) {
-        console.error('Error fetching saved strangers:', err);
+        console.error('Error fetching saved chats:', err);
       } finally {
         setLoading(false);
       }
@@ -49,7 +49,7 @@ export default function SavedStrangersPage() {
 
     loadSaved();
 
-    // Listen for realtime bilateral deletion by partner
+    // Listen for realtime deletion by partner
     const unsubDeleted = socketClient.onSaveDeleted((payload) => {
       setSavedList((prev) => prev.filter((item) => item.conversationId !== payload.conversationId));
     });
@@ -78,6 +78,8 @@ export default function SavedStrangersPage() {
     }
   };
 
+  const isAuthenticated = currentUser?.accountType === 'authenticated';
+
   return (
     <div className="min-h-[100dvh] flex flex-col bg-background text-foreground transition-colors selection:bg-coral-light selection:text-coral-dark">
       <Navbar
@@ -92,10 +94,12 @@ export default function SavedStrangersPage() {
       />
 
       <main className="flex-1 max-w-4xl w-full mx-auto px-4 sm:px-6 py-8 sm:py-12 space-y-8">
-        <div className="flex items-center justify-between">
+        {/* Header */}
+        <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-3">
             <Link
               href="/"
+              aria-label="Back to home"
               className="p-2 rounded-full text-neutral-500 hover:text-neutral-900 dark:hover:text-neutral-100 hover:bg-neutral-200/50 dark:hover:bg-neutral-800 transition-colors"
             >
               <ArrowLeft className="w-5 h-5" />
@@ -105,55 +109,64 @@ export default function SavedStrangersPage() {
                 Saved Chats
               </h1>
               <p className="text-xs sm:text-sm text-neutral-500 dark:text-neutral-400">
-                Persistent end-to-end encrypted conversations saved with mutual consent.
+                Conversations you and another person chose to keep.
               </p>
             </div>
           </div>
 
           <Link
             href="/chat"
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-coral hover:bg-coral-hover text-white font-semibold text-xs sm:text-sm shadow-md shadow-coral/20 transition-all active:scale-95"
+            className="inline-flex items-center gap-2 px-5 py-2.5 rounded-full bg-coral hover:bg-coral-hover text-white font-semibold text-xs sm:text-sm shadow-md shadow-coral/20 transition-all active:scale-95 shrink-0"
           >
             <MessageSquare className="w-4 h-4" />
-            <span>Find New Stranger</span>
+            <span className="hidden xs:inline">Find New Stranger</span>
+            <span className="xs:hidden">Chat</span>
           </Link>
         </div>
 
-        {/* Guest / Anonymous Warning Banner */}
-        {(!currentUser || currentUser.accountType === 'guest') && (
-          <div className="p-4 sm:p-5 rounded-3xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200/60 dark:border-amber-900/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-            <div className="space-y-1">
-              <h4 className="text-xs sm:text-sm font-bold text-amber-800 dark:text-amber-400 flex items-center gap-1.5">
-                <Sparkles className="w-4 h-4" />
-                <span>Sign in to access Saved Chats</span>
-              </h4>
-              <p className="text-xs text-amber-700/80 dark:text-amber-400/70">
-                Sign in with Google to view and manage your mutually saved conversations across devices.
-              </p>
-            </div>
-            <button
-              onClick={() => setAuthModalOpen(true)}
-              className="px-4 py-2 rounded-full bg-amber-500 hover:bg-amber-400 text-black font-bold text-xs transition-colors shrink-0 shadow-sm"
-            >
-              Sign In with Google
-            </button>
-          </div>
-        )}
-
-        {/* Saved List */}
+        {/* 1. Loading State */}
         {loading ? (
           <div className="py-24 text-center text-xs sm:text-sm text-neutral-400 animate-pulse">
             Loading your saved conversations...
           </div>
+        ) : !isAuthenticated ? (
+          /* 2. Logged-Out / Anonymous State */
+          <div className="p-8 sm:p-12 text-center rounded-3xl border border-[#e5e3de] dark:border-neutral-800 bg-white/60 dark:bg-neutral-900/60 shadow-sm space-y-6 max-w-lg mx-auto">
+            <div className="w-14 h-14 rounded-full bg-coral-light dark:bg-coral-dark/40 text-coral dark:text-[#fca5a5] flex items-center justify-center mx-auto shadow-sm">
+              <Bookmark className="w-7 h-7" />
+            </div>
+
+            <div className="space-y-2">
+              <h2 className="text-xl font-bold text-neutral-900 dark:text-neutral-100">
+                Saved Chats
+              </h2>
+              <p className="text-xs sm:text-sm text-neutral-600 dark:text-neutral-400 leading-relaxed max-w-md mx-auto">
+                Saved conversations are available for logged-in users. Chat anonymously without an account, or sign in to save conversations with mutual consent.
+              </p>
+            </div>
+
+            <div className="pt-2">
+              <button
+                onClick={() => setAuthModalOpen(true)}
+                className="inline-flex items-center gap-2 px-6 py-3 rounded-full bg-neutral-900 hover:bg-neutral-800 dark:bg-neutral-100 dark:hover:bg-neutral-200 text-white dark:text-neutral-900 font-semibold text-xs sm:text-sm shadow-md transition-all active:scale-95"
+              >
+                <Sparkles className="w-4 h-4 text-amber-400" />
+                <span>Sign In with Google</span>
+              </button>
+            </div>
+          </div>
         ) : savedList.length === 0 ? (
+          /* 3. Authenticated Empty State */
           <div className="p-12 sm:p-16 text-center rounded-3xl border border-dashed border-[#e5e3de] dark:border-neutral-800 bg-white/40 dark:bg-neutral-900/40 space-y-4">
             <div className="w-14 h-14 rounded-full bg-coral-light dark:bg-coral-dark/40 text-coral dark:text-[#fca5a5] flex items-center justify-center mx-auto shadow-sm">
               <Bookmark className="w-7 h-7" />
             </div>
             <div className="space-y-1">
-              <h3 className="text-lg font-bold text-neutral-900 dark:text-neutral-100">No Saved Chats Yet</h3>
+              <h2 className="text-lg font-bold text-neutral-900 dark:text-neutral-100">
+                No Saved Chats Yet
+              </h2>
               <p className="text-xs sm:text-sm text-neutral-500 dark:text-neutral-400 max-w-sm mx-auto leading-relaxed">
-                When chatting with another authenticated student, click &quot;Save Chat&quot;. When both of you accept, the conversation is saved here.
+                Save a conversation when both of you agree to keep it.
               </p>
             </div>
             <div className="pt-2">
@@ -162,11 +175,12 @@ export default function SavedStrangersPage() {
                 className="inline-flex items-center gap-2 px-6 py-3 rounded-full bg-coral hover:bg-coral-hover text-white font-semibold text-xs sm:text-sm shadow-md shadow-coral/20 transition-all active:scale-95"
               >
                 <Users className="w-4 h-4" />
-                <span>Start Chatting Now</span>
+                <span>Find New Stranger</span>
               </Link>
             </div>
           </div>
         ) : (
+          /* 4. Authenticated Saved Chat List */
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
             {savedList.map((item) => (
               <div
@@ -216,7 +230,7 @@ export default function SavedStrangersPage() {
                     className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-full bg-coral-light dark:bg-coral-dark/30 text-coral dark:text-[#fca5a5] hover:bg-coral hover:text-white text-xs font-bold transition-all active:scale-95"
                   >
                     <MessageSquare className="w-3.5 h-3.5" />
-                    <span>Continue Chat</span>
+                    <span>Open</span>
                   </Link>
                 </div>
               </div>
@@ -271,7 +285,12 @@ export default function SavedStrangersPage() {
       <SaveStrangerModal
         isOpen={authModalOpen}
         onClose={() => setAuthModalOpen(false)}
-        onSuccess={(u) => setCurrentUser(u)}
+        onSuccess={(u) => {
+          setCurrentUser(u);
+          if (u.accountType === 'authenticated') {
+            apiClient.getSavedStrangers().then((list) => setSavedList(list)).catch(() => {});
+          }
+        }}
       />
     </div>
   );
