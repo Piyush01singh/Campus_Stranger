@@ -182,7 +182,9 @@ export default function ResumedChatPage() {
       <Navbar
         user={currentUser}
         onOpenAuthModal={() => setSaveModalOpen(true)}
-        onLogout={() => {
+        onLogout={async () => {
+          await apiClient.logout();
+          socketClient.disconnect();
           setCurrentUser(null);
           router.push('/');
         }}
@@ -203,7 +205,9 @@ export default function ResumedChatPage() {
             initialMessages={initialMessages}
             incomingSaveRequest={incomingSaveRequest}
             isMutualSaved={isMutualSaved}
+            isSaveAvailable={true}
             isSaveRequestPending={isSaveRequestPending}
+            onSendSaveRequest={handleSendSaveRequest}
             onAcceptSaveRequest={handleAcceptSaveRequest}
             onDeclineSaveRequest={handleDeclineSaveRequest}
             onNextStranger={handleNextStranger}
@@ -217,11 +221,7 @@ export default function ResumedChatPage() {
       <SaveStrangerModal
         isOpen={saveModalOpen}
         onClose={() => setSaveModalOpen(false)}
-        conversationId={conversationId}
         currentUser={currentUser}
-        partnerDisplayName={partnerDisplayName}
-        onSendSaveRequest={handleSendSaveRequest}
-        isSaveRequestPending={isSaveRequestPending}
         onSuccess={(u) => setCurrentUser(u)}
       />
 

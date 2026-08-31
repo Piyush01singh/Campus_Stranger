@@ -1,6 +1,6 @@
 'use client';
 
-import React, { Suspense, useEffect, useState } from 'react';
+import React, { Suspense, useEffect, useRef, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Navbar } from '../../components/Navbar';
 import { MatchmakingView } from '../../components/MatchmakingView';
@@ -14,15 +14,14 @@ import {
   IWsMatchFoundPayload,
   IWsSaveRequestReceivedPayload,
   ReportReason,
-  toConversationId,
 } from '@campus-stranger/shared-types';
+
+const ACTIVE_CONV_STORAGE_KEY = 'cs_active_conv';
 
 function ChatContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const nicknameParam = searchParams.get('nickname');
-  const authTokenParam = searchParams.get('auth_token');
-  const returnConvParam = searchParams.get('return_conv');
 
   const [currentUser, setCurrentUser] = useState<IUser | null>(null);
   const [matchState, setMatchState] = useState<'idle' | 'searching' | 'matched' | 'ended'>('searching');
@@ -39,56 +38,11 @@ function ChatContent() {
   const [blockModalOpen, setBlockModalOpen] = useState(false);
   const [reportModalOpen, setReportModalOpen] = useState(false);
 
+  const initAttemptedRef = useRef(false);
+
+  // 1. Persistent Realtime Socket Listeners (Never torn down on URL query changes)
   useEffect(() => {
-    let isMounted = true;
-
-    async function initUserAndMatch() {
-      try {
-        // Handle OAuth callback redirect token if present
-        if (authTokenParam) {
-          apiClient.setToken(authTokenParam);
-          window.history.replaceState({}, '', '/chat');
-        }
-
-        let user = await apiClient.getMe();
-        if (!user) {
-          const guest = await apiClient.createGuest(nicknameParam || undefined);
-          user = guest.user;
-        }
-
-        if (!isMounted) return;
-        setCurrentUser(user);
-
-        // Connect socket
-        await socketClient.connect();
-
-        // If returned from OAuth for saving a specific active conversation
-        if (returnConvParam) {
-          const convId = toConversationId(returnConvParam);
-          setActiveConversation({
-            conversationId: convId,
-            partnerDisplayName: 'Stranger',
-            matchedAt: new Date().toISOString(),
-          });
-          setMatchState('matched');
-          socketClient.sync(convId);
-
-          if (user.accountType === 'authenticated') {
-            socketClient.sendSaveRequest(convId);
-            setIsSaveRequestPending(true);
-          }
-        } else {
-          await socketClient.joinMatchmaking();
-          setMatchState('searching');
-        }
-      } catch (err) {
-        console.error('Error in chat initialization:', err);
-      }
-    }
-
-    initUserAndMatch();
-
-    // 1. Listen for match found event
+    // A. Match Found
     const unsubMatch = socketClient.onMatchFound((payload) => {
       setActiveConversation(payload);
       setMatchState('matched');
@@ -96,49 +50,67 @@ function ChatContent() {
       setIncomingSaveRequest(null);
       setIsMutualSaved(false);
       setIsSaveRequestPending(false);
+
+      if (typeof window !== 'undefined') {
+        try {
+          sessionStorage.setItem(ACTIVE_CONV_STORAGE_KEY, JSON.stringify(payload));
+        } catch {
+          // sessionStorage not accessible
+        }
+      }
     });
 
-    // 2. Listen for chat ended event
+    // B. Chat Ended
     const unsubEnded = socketClient.onChatEnded((reason) => {
       setEndedReason(reason);
       setMatchState('ended');
       setIncomingSaveRequest(null);
       setIsSaveRequestPending(false);
+
+      if (typeof window !== 'undefined') {
+        try {
+          sessionStorage.removeItem(ACTIVE_CONV_STORAGE_KEY);
+        } catch {
+          // sessionStorage not accessible
+        }
+      }
     });
 
-    // 3. Listen for incoming save request (User B)
+    // C. Incoming Save Request
     const unsubSaveReq = socketClient.onSaveRequestReceived((payload) => {
       setIncomingSaveRequest(payload);
     });
 
-    // 4. Listen for save accepted (both users)
+    // D. Save Accepted
     const unsubSaveAccept = socketClient.onSaveAccepted(() => {
       setIsMutualSaved(true);
       setIncomingSaveRequest(null);
       setIsSaveRequestPending(false);
     });
 
-    // 5. Listen for save declined
+    // E. Save Declined
     const unsubSaveDecline = socketClient.onSaveDeclined(() => {
       setIncomingSaveRequest(null);
       setIsSaveRequestPending(false);
     });
 
-    // 6. Listen for save cancelled
+    // F. Save Cancelled
     const unsubSaveCancel = socketClient.onSaveCancelled(() => {
       setIncomingSaveRequest(null);
       setIsSaveRequestPending(false);
     });
 
-    // 7. Listen for sync completed to restore pending save requests
+    // G. Sync Completed (Restores messages, partner status & pending save request state)
     const unsubSync = socketClient.onSyncCompleted((payload) => {
       if (payload.pendingSaveRequest) {
         setIncomingSaveRequest(payload.pendingSaveRequest);
       }
+      if (payload.isSaveAvailable !== undefined) {
+        setActiveConversation((prev) => (prev ? { ...prev, isSaveAvailable: payload.isSaveAvailable } : null));
+      }
     });
 
     return () => {
-      isMounted = false;
       unsubMatch();
       unsubEnded();
       unsubSaveReq();
@@ -146,16 +118,70 @@ function ChatContent() {
       unsubSaveDecline();
       unsubSaveCancel();
       unsubSync();
-      socketClient.leaveMatchmaking();
     };
-  }, [nicknameParam, authTokenParam, returnConvParam]);
+  }, []);
+
+  // 2. Deterministic One-Time Chat State & Auth Hydration
+  useEffect(() => {
+    if (initAttemptedRef.current) return;
+    initAttemptedRef.current = true;
+
+    async function initLifecycle() {
+      try {
+        // 1. Hydrate authentication state from server session cookie
+        let user = await apiClient.getMe();
+        if (!user) {
+          const guest = await apiClient.createGuest(nicknameParam || undefined);
+          user = guest.user;
+        }
+        setCurrentUser(user);
+
+        // 2. Connect & Authenticate WebSocket
+        await socketClient.connect();
+
+        // 3. Check for active conversation in sessionStorage on page reload (F5)
+        let storedConv: IWsMatchFoundPayload | null = null;
+        if (typeof window !== 'undefined') {
+          try {
+            const raw = sessionStorage.getItem(ACTIVE_CONV_STORAGE_KEY);
+            if (raw) storedConv = JSON.parse(raw);
+          } catch {
+            // sessionStorage error
+          }
+        }
+
+        if (storedConv?.conversationId) {
+          setActiveConversation(storedConv);
+          setMatchState('matched');
+          socketClient.sync(storedConv.conversationId);
+        } else {
+          // Fresh matchmaking
+          await socketClient.joinMatchmaking();
+          setMatchState('searching');
+        }
+      } catch (err) {
+        console.error('Error during chat lifecycle initialization:', err);
+      }
+    }
+
+    initLifecycle();
+  }, [nicknameParam]);
 
   const handleNextStranger = () => {
+    if (typeof window !== 'undefined') {
+      try {
+        sessionStorage.removeItem(ACTIVE_CONV_STORAGE_KEY);
+      } catch {
+        // sessionStorage not accessible
+      }
+    }
+
     if (activeConversation) {
       socketClient.nextStranger(activeConversation.conversationId);
     } else {
       socketClient.joinMatchmaking();
     }
+
     setActiveConversation(null);
     setMatchState('searching');
     setEndedReason(null);
@@ -165,12 +191,26 @@ function ChatContent() {
   };
 
   const handleCancelMatch = () => {
+    if (typeof window !== 'undefined') {
+      try {
+        sessionStorage.removeItem(ACTIVE_CONV_STORAGE_KEY);
+      } catch {
+        // sessionStorage not accessible
+      }
+    }
     socketClient.leaveMatchmaking();
     router.push('/');
   };
 
   const handleConfirmBlock = () => {
     if (activeConversation) {
+      if (typeof window !== 'undefined') {
+        try {
+          sessionStorage.removeItem(ACTIVE_CONV_STORAGE_KEY);
+        } catch {
+          // sessionStorage not accessible
+        }
+      }
       socketClient.blockStranger(activeConversation.conversationId);
       setMatchState('ended');
       setEndedReason('partner_blocked');
@@ -207,12 +247,26 @@ function ChatContent() {
     }
   };
 
+  const handleLogout = async () => {
+    if (typeof window !== 'undefined') {
+      try {
+        sessionStorage.removeItem(ACTIVE_CONV_STORAGE_KEY);
+      } catch {
+        // sessionStorage not accessible
+      }
+    }
+    await apiClient.logout();
+    socketClient.disconnect();
+    setCurrentUser(null);
+    router.push('/');
+  };
+
   return (
     <div className="min-h-[100dvh] h-[100dvh] max-h-[100dvh] flex flex-col overflow-hidden bg-background text-foreground transition-colors selection:bg-coral-light selection:text-coral-dark">
       <Navbar
         user={currentUser}
         onOpenAuthModal={() => setSaveModalOpen(true)}
-        onLogout={() => setCurrentUser(null)}
+        onLogout={handleLogout}
       />
 
       <main className="flex-1 flex flex-col min-h-0 overflow-hidden w-full">
@@ -229,7 +283,9 @@ function ChatContent() {
             partnerDisplayName={activeConversation.partnerDisplayName}
             incomingSaveRequest={incomingSaveRequest}
             isMutualSaved={isMutualSaved}
+            isSaveAvailable={Boolean(activeConversation.isSaveAvailable)}
             isSaveRequestPending={isSaveRequestPending}
+            onSendSaveRequest={handleSendSaveRequest}
             onAcceptSaveRequest={handleAcceptSaveRequest}
             onDeclineSaveRequest={handleDeclineSaveRequest}
             onNextStranger={handleNextStranger}
@@ -268,11 +324,7 @@ function ChatContent() {
       <SaveStrangerModal
         isOpen={saveModalOpen}
         onClose={() => setSaveModalOpen(false)}
-        conversationId={activeConversation?.conversationId}
         currentUser={currentUser}
-        partnerDisplayName={activeConversation?.partnerDisplayName}
-        onSendSaveRequest={handleSendSaveRequest}
-        isSaveRequestPending={isSaveRequestPending}
         onSuccess={(u) => setCurrentUser(u)}
       />
 

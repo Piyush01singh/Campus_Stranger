@@ -36,11 +36,13 @@ interface ChatRoomProps {
   initialMessages?: ChatMessage[];
   incomingSaveRequest?: IWsSaveRequestReceivedPayload | null;
   isMutualSaved?: boolean;
+  isSaveAvailable?: boolean;
   isSaveRequestPending?: boolean;
+  onSendSaveRequest?: () => void;
   onAcceptSaveRequest?: () => void;
   onDeclineSaveRequest?: () => void;
   onNextStranger: () => void;
-  onOpenSaveModal: () => void;
+  onOpenSaveModal?: () => void;
   onOpenBlockModal: () => void;
   onOpenReportModal: () => void;
 }
@@ -52,11 +54,13 @@ export function ChatRoom({
   initialMessages = [],
   incomingSaveRequest,
   isMutualSaved = false,
+  isSaveAvailable = false,
   isSaveRequestPending = false,
+  onSendSaveRequest,
   onAcceptSaveRequest,
   onDeclineSaveRequest,
   onNextStranger,
-  onOpenSaveModal,
+  onOpenSaveModal: _onOpenSaveModal,
   onOpenBlockModal,
   onOpenReportModal,
 }: ChatRoomProps) {
@@ -235,30 +239,34 @@ export function ChatRoom({
 
         {/* Action Controls */}
         <div className="flex items-center gap-1 xs:gap-1.5 sm:gap-2 shrink-0">
-          {isMutualSaved ? (
-            <div className="inline-flex items-center gap-1 px-2 xs:px-2.5 sm:px-3.5 py-1.5 rounded-full text-[10px] xs:text-[11px] sm:text-xs font-semibold bg-[#e8f7ee] dark:bg-[#162e22] text-[#2d5e3f] dark:text-[#86efac] select-none shrink-0">
-              <BookmarkCheck className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-              <span className="hidden sm:inline">Saved</span>
-            </div>
-          ) : (
-            <button
-              onClick={onOpenSaveModal}
-              disabled={isSaveRequestPending}
-              title={isSaveRequestPending ? 'Save Request Sent' : 'Save Stranger'}
-              className="inline-flex items-center gap-1 px-2 xs:px-2.5 sm:px-3.5 py-1.5 rounded-full text-[10px] xs:text-[11px] sm:text-xs font-semibold bg-coral-light dark:bg-coral-dark/30 text-coral dark:text-[#fca5a5] hover:bg-coral hover:text-white transition-all shadow-xs active:scale-95 shrink-0 disabled:opacity-60"
-            >
-              {isSaveRequestPending ? (
-                <>
-                  <Clock className="w-3 h-3 sm:w-3.5 sm:h-3.5 animate-spin" />
-                  <span className="hidden sm:inline">Sent</span>
-                </>
-              ) : (
-                <>
-                  <Bookmark className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
-                  <span className="hidden sm:inline">Save</span>
-                </>
-              )}
-            </button>
+          {currentUser.accountType === 'authenticated' && isSaveAvailable && (
+            isMutualSaved ? (
+              <div className="inline-flex items-center gap-1 px-2 xs:px-2.5 sm:px-3.5 py-1.5 rounded-full text-[10px] xs:text-[11px] sm:text-xs font-semibold bg-[#e8f7ee] dark:bg-[#162e22] text-[#2d5e3f] dark:text-[#86efac] select-none shrink-0">
+                <BookmarkCheck className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                <span className="hidden sm:inline">Saved</span>
+              </div>
+            ) : (
+              <button
+                onClick={onSendSaveRequest}
+                disabled={isSaveRequestPending}
+                title={isSaveRequestPending ? 'Save request sent' : 'Save Chat'}
+                aria-label="Save Chat"
+                className="inline-flex items-center gap-1 px-2 xs:px-2.5 sm:px-3.5 py-1.5 rounded-full text-[10px] xs:text-[11px] sm:text-xs font-semibold bg-coral-light dark:bg-coral-dark/30 text-coral dark:text-[#fca5a5] hover:bg-coral hover:text-white transition-all shadow-xs active:scale-95 shrink-0 disabled:opacity-60"
+              >
+                {isSaveRequestPending ? (
+                  <>
+                    <Clock className="w-3 h-3 sm:w-3.5 sm:h-3.5 animate-spin" />
+                    <span className="hidden sm:inline">Sent</span>
+                  </>
+                ) : (
+                  <>
+                    <Bookmark className="w-3 h-3 sm:w-3.5 sm:h-3.5" />
+                    <span className="hidden sm:inline">Save Chat</span>
+                    <span className="sm:hidden">Save</span>
+                  </>
+                )}
+              </button>
+            )
           )}
 
           <button

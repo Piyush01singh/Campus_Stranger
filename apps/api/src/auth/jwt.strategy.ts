@@ -4,6 +4,7 @@ import { ExtractJwt, Strategy } from 'passport-jwt';
 import { ConfigService } from '@nestjs/config';
 import { AuthService } from './auth.service';
 import { IUser } from '@campus-stranger/shared-types';
+import type { Request } from 'express';
 
 export interface JwtPayload {
   sub: string;
@@ -12,6 +13,28 @@ export interface JwtPayload {
   sessionId?: string;
 }
 
+const extractJwtFromCookieOrHeader = (req: Request): string | null => {
+  // 1. Check req.cookies if cookie-parser is present
+  const reqAny = req as unknown as { cookies?: Record<string, string> };
+  if (reqAny?.cookies?.cs_auth_token) {
+    return reqAny.cookies.cs_auth_token;
+  }
+  if (reqAny?.cookies?.session_token) {
+    return reqAny.cookies.session_token;
+  }
+
+  // 2. Fallback check on raw Cookie header string
+  if (req.headers && req.headers.cookie) {
+    const rawCookie = req.headers.cookie;
+    const match = rawCookie.match(/(?:^|;\s*)(?:cs_auth_token|session_token)=([^;]+)/);
+    if (match) {
+      return decodeURIComponent(match[1]);
+    }
+  }
+
+  return null;
+};
+
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(
@@ -19,7 +42,10 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     configService: ConfigService,
   ) {
     super({
-      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      jwtFromRequest: ExtractJwt.fromExtractors([
+        ExtractJwt.fromAuthHeaderAsBearerToken(),
+        extractJwtFromCookieOrHeader,
+      ]),
       ignoreExpiration: false,
       secretOrKey: configService.get<string>(
         'sessionSecret',

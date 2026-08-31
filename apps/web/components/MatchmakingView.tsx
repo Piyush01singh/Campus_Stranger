@@ -1,7 +1,7 @@
 'use client';
 
 import React from 'react';
-import { Users, Lock, X, Sparkles } from 'lucide-react';
+import { Users, Lock, X, User } from 'lucide-react';
 
 interface MatchmakingViewProps {
   onCancel: () => void;
@@ -44,7 +44,7 @@ export function MatchmakingView({ onCancel }: MatchmakingViewProps) {
 
         <div className="p-4 rounded-2xl bg-white dark:bg-neutral-900 border border-[#e5e3de] dark:border-neutral-800 shadow-sm">
           <div className="w-8 h-8 rounded-full bg-coral-light dark:bg-coral-dark/40 text-coral dark:text-[#fca5a5] flex items-center justify-center mb-2">
-            <Sparkles className="w-4 h-4" />
+            <User className="w-4 h-4" />
           </div>
           <h4 className="text-xs font-bold text-neutral-900 dark:text-neutral-200">Instant Anonymous</h4>
           <p className="text-[11px] text-neutral-500 dark:text-neutral-400">No account required to chat.</p>

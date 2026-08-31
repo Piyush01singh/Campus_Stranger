@@ -1,4 +1,15 @@
-import { Body, Controller, ForbiddenException, Get, Logger, Post, Req, Res, Request, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  ForbiddenException,
+  Get,
+  Logger,
+  Post,
+  Req,
+  Res,
+  Request,
+  UseGuards,
+} from '@nestjs/common';
 import type { Response } from 'express';
 import { ConfigService } from '@nestjs/config';
 import { AuthService, AuthSessionResponse } from './auth.service';
@@ -33,6 +44,23 @@ export class MockLinkGoogleDto {
   displayName?: string;
 }
 
+export class TestLoginDto {
+  @IsString()
+  @IsOptional()
+  @MaxLength(50)
+  displayName?: string;
+
+  @IsEmail()
+  @IsOptional()
+  @MaxLength(255)
+  email?: string;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(100)
+  googleId?: string;
+}
+
 @Controller('auth')
 export class AuthController {
   private readonly logger = new Logger(AuthController.name);
@@ -45,8 +73,20 @@ export class AuthController {
   @Post('guest')
   async createGuest(
     @Body() dto: CreateGuestDto,
+    @Res({ passthrough: true }) res: Response,
   ): Promise<IApiSuccessResponse<AuthSessionResponse>> {
     const session = await this.authService.createGuest(dto.displayName);
+    const nodeEnv = this.configService.get<string>('nodeEnv', 'development');
+    const isProd = nodeEnv === 'production';
+
+    res.cookie('cs_auth_token', session.accessToken, {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: isProd ? 'none' : 'lax',
+      maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+      path: '/',
+    });
+
     return {
       success: true,
       data: session,
@@ -64,6 +104,35 @@ export class AuthController {
     };
   }
 
+  @UseGuards(JwtAuthGuard)
+  @Get('session')
+  async getSession(@Request() req: { user: IUser }): Promise<IApiSuccessResponse<IUser>> {
+    return {
+      success: true,
+      data: req.user,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  @Post('logout')
+  async logout(@Res() res: Response): Promise<void> {
+    const nodeEnv = this.configService.get<string>('nodeEnv', 'development');
+    const isProd = nodeEnv === 'production';
+
+    res.clearCookie('cs_auth_token', {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: isProd ? 'none' : 'lax',
+      path: '/',
+    });
+
+    res.status(200).json({
+      success: true,
+      data: { loggedOut: true },
+      timestamp: new Date().toISOString(),
+    });
+  }
+
   /**
    * Production Google OAuth 2.0 initiation.
    * Redirects user to Google Consent Screen.
@@ -77,15 +146,17 @@ export class AuthController {
 
   /**
    * Production Google OAuth 2.0 callback route.
-   * Exchanges authorization code, links/creates user, and redirects to frontend with token.
+   * Exchanges authorization code, links/creates user, sets session cookie, and redirects to frontend.
    */
   @UseGuards(GoogleAuthGuard)
   @Get('google/callback')
   async googleAuthCallback(
-    @Req() req: { user?: GoogleValidatedUser; query?: Record<string, unknown> },
+    @Req() req: { user?: GoogleValidatedUser; query?: Record<string, unknown>; cookies?: Record<string, string>; headers?: Record<string, string> },
     @Res() res: Response,
   ) {
     const frontendUrl = this.configService.get<string>('frontendUrl', 'http://localhost:3000');
+    const nodeEnv = this.configService.get<string>('nodeEnv', 'development');
+    const isProd = nodeEnv === 'production';
 
     if (!req.user || !req.user.googleId) {
       this.logger.error('Google OAuth callback failed: Google user profile was not returned from provider');
@@ -102,25 +173,29 @@ export class AuthController {
 
       const stateData = stateParam ? this.authService.extractStateData(stateParam) : {};
 
-      const session = await this.authService.findOrCreateGoogleUser(
-        {
-          id: req.user.googleId,
-          email: req.user.email,
-          displayName: req.user.displayName,
-        },
-        stateData.userId,
-      );
+      const session = await this.authService.findOrCreateGoogleUser({
+        id: req.user.googleId,
+        email: req.user.email,
+        displayName: req.user.displayName,
+      });
 
       this.logger.log(
         `Google OAuth authenticated successfully for user ${session.user.displayName} (${session.user.id})`,
       );
 
-      if (stateData.conversationId) {
-        return res.redirect(
-          `${frontendUrl}/chat?auth_token=${encodeURIComponent(session.accessToken)}&return_conv=${encodeURIComponent(stateData.conversationId)}`,
-        );
+      // Issue cross-site compatible HttpOnly session cookie
+      res.cookie('cs_auth_token', session.accessToken, {
+        httpOnly: true,
+        secure: isProd,
+        sameSite: isProd ? 'none' : 'lax',
+        maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+        path: '/',
+      });
+
+      if (stateData.returnUrl) {
+        return res.redirect(`${frontendUrl}${stateData.returnUrl}`);
       } else {
-        return res.redirect(`${frontendUrl}/saved?auth_token=${encodeURIComponent(session.accessToken)}`);
+        return res.redirect(`${frontendUrl}/`);
       }
     } catch (err) {
       this.logger.error(
@@ -152,6 +227,44 @@ export class AuthController {
       email: dto.email,
       displayName: dto.displayName,
     });
+    return {
+      success: true,
+      data: session,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Safe development & automated testing login endpoint.
+   * Directly authenticates as a named user and issues standard HttpOnly session cookie.
+   * Strictly disabled in production.
+   */
+  @Post('test-login')
+  async testLogin(
+    @Body() dto: TestLoginDto,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<IApiSuccessResponse<AuthSessionResponse>> {
+    const nodeEnv = this.configService.get<string>('nodeEnv', 'development');
+    if (nodeEnv === 'production') {
+      throw new ForbiddenException(
+        'Test login endpoint is strictly disabled in production environments.',
+      );
+    }
+
+    const session = await this.authService.createTestAuthenticatedUser(
+      dto.displayName,
+      dto.email,
+      dto.googleId,
+    );
+
+    res.cookie('cs_auth_token', session.accessToken, {
+      httpOnly: true,
+      secure: false,
+      sameSite: 'lax',
+      maxAge: 30 * 24 * 60 * 60 * 1000,
+      path: '/',
+    });
+
     return {
       success: true,
       data: session,

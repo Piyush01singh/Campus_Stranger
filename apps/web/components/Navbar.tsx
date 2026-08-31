@@ -38,9 +38,16 @@ export function Navbar({ user, onOpenAuthModal, onLogout }: NavbarProps) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
     setDropdownOpen(false);
-    apiClient.clearToken();
+    if (typeof window !== 'undefined') {
+      try {
+        sessionStorage.removeItem('cs_active_conv');
+      } catch {
+        // sessionStorage not accessible
+      }
+    }
+    await apiClient.logout();
     socketClient.disconnect();
     if (onLogout) {
       onLogout();
@@ -175,7 +182,7 @@ export function Navbar({ user, onOpenAuthModal, onLogout }: NavbarProps) {
                       className="flex items-center gap-2 px-3.5 py-2 text-neutral-700 dark:text-neutral-300 hover:bg-neutral-100 dark:hover:bg-neutral-800 transition-colors"
                     >
                       <Bookmark className="w-3.5 h-3.5 text-coral" />
-                      <span>Saved Strangers</span>
+                      <span>Saved Chats</span>
                     </Link>
 
                     {user.accountType === 'guest' && onOpenAuthModal && (
@@ -187,7 +194,7 @@ export function Navbar({ user, onOpenAuthModal, onLogout }: NavbarProps) {
                         className="w-full text-left flex items-center gap-2 px-3.5 py-2 text-coral hover:bg-coral-light/20 dark:hover:bg-coral-dark/20 transition-colors font-medium"
                       >
                         <UserIcon className="w-3.5 h-3.5" />
-                        <span>Link Google Account</span>
+                        <span>Sign in with Google</span>
                       </button>
                     )}
 

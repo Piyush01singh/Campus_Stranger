@@ -18,9 +18,10 @@ export interface ISavedStrangerView {
 class ApiClient {
   private inMemoryToken: string | null = null;
 
-  private getHeaders(): HeadersInit {
-    const headers: HeadersInit = {
+  private getHeaders(customHeaders: HeadersInit = {}): HeadersInit {
+    const headers: Record<string, string> = {
       'Content-Type': 'application/json',
+      ...((customHeaders as Record<string, string>) || {}),
     };
     const token = this.getToken();
     if (token) {
@@ -29,44 +30,30 @@ class ApiClient {
     return headers;
   }
 
-  setToken(token: string) {
+  private fetchWithAuth(url: string, init: RequestInit = {}): Promise<Response> {
+    const headers = this.getHeaders(init.headers);
+    return fetch(url, {
+      ...init,
+      credentials: 'include',
+      headers,
+    });
+  }
+
+  setToken(token: string | null) {
     this.inMemoryToken = token;
-    if (typeof window !== 'undefined') {
-      try {
-        localStorage.setItem('cs_auth_token', token);
-      } catch {
-        // localStorage not accessible
-      }
-    }
   }
 
   getToken(): string | null {
-    if (typeof window !== 'undefined') {
-      try {
-        const stored = localStorage.getItem('cs_auth_token');
-        if (stored) return stored;
-      } catch {
-        // localStorage not accessible
-      }
-    }
     return this.inMemoryToken;
   }
 
   clearToken() {
     this.inMemoryToken = null;
-    if (typeof window !== 'undefined') {
-      try {
-        localStorage.removeItem('cs_auth_token');
-      } catch {
-        // localStorage not accessible
-      }
-    }
   }
 
   async createGuest(displayName?: string): Promise<{ user: IUser; accessToken: string }> {
-    const res = await fetch(`${API_BASE}/api/auth/guest`, {
+    const res = await this.fetchWithAuth(`${API_BASE}/api/auth/guest`, {
       method: 'POST',
-      headers: this.getHeaders(),
       body: JSON.stringify({ displayName }),
     });
     if (!res.ok) throw new Error('Failed to create guest session');
@@ -76,12 +63,8 @@ class ApiClient {
   }
 
   async getMe(): Promise<IUser | null> {
-    const token = this.getToken();
-    if (!token) return null;
     try {
-      const res = await fetch(`${API_BASE}/api/auth/me`, {
-        headers: this.getHeaders(),
-      });
+      const res = await this.fetchWithAuth(`${API_BASE}/api/auth/me`);
       if (!res.ok) return null;
       const json: IApiSuccessResponse<IUser> = await res.json();
       return json.data;
@@ -90,11 +73,20 @@ class ApiClient {
     }
   }
 
+  async logout(): Promise<void> {
+    this.clearToken();
+    try {
+      await this.fetchWithAuth(`${API_BASE}/api/auth/logout`, {
+        method: 'POST',
+      });
+    } catch {
+      // Ignore network error on logout
+    }
+  }
+
   async getActiveUserCount(): Promise<number> {
     try {
-      const res = await fetch(`${API_BASE}/api/presence/active-users`, {
-        headers: this.getHeaders(),
-      });
+      const res = await this.fetchWithAuth(`${API_BASE}/api/presence/active-users`);
       if (!res.ok) return 0;
       const json: IApiSuccessResponse<{ count: number }> = await res.json();
       return json.data.count;
@@ -103,61 +95,64 @@ class ApiClient {
     }
   }
 
-  getGoogleOAuthUrl(guestToken?: string, conversationId?: string): string {
-    const token = guestToken || this.getToken();
-    if (!token && !conversationId) {
+  getGoogleOAuthUrl(_guestToken?: string, _conversationId?: string, returnUrl?: string): string {
+    if (!returnUrl) {
       return `${API_BASE}/api/auth/google`;
     }
 
-    if (conversationId) {
-      const stateObj = { token: token || undefined, conversationId };
-      const stateStr = btoa(JSON.stringify(stateObj));
-      return `${API_BASE}/api/auth/google?state=${encodeURIComponent(stateStr)}`;
-    }
+    const stateObj: { returnUrl?: string } = { returnUrl };
+    const stateStr = btoa(JSON.stringify(stateObj));
+    return `${API_BASE}/api/auth/google?state=${encodeURIComponent(stateStr)}`;
+  }
 
-    return `${API_BASE}/api/auth/google${token ? `?state=${encodeURIComponent(token)}` : ''}`;
+  /**
+   * Safe development and test login helper. Disabled in production.
+   */
+  async testLogin(displayName?: string, email?: string, googleId?: string): Promise<{ user: IUser; accessToken: string }> {
+    const res = await this.fetchWithAuth(`${API_BASE}/api/auth/test-login`, {
+      method: 'POST',
+      body: JSON.stringify({ displayName, email, googleId }),
+    });
+    if (!res.ok) throw new Error('Failed to perform dev test login');
+    const json: IApiSuccessResponse<{ user: IUser; accessToken: string }> = await res.json();
+    this.setToken(json.data.accessToken);
+    return json.data;
   }
 
   async getSavedStrangers(): Promise<ISavedStrangerView[]> {
-    const res = await fetch(`${API_BASE}/api/conversations/saved`, {
-      headers: this.getHeaders(),
-    });
+    const res = await this.fetchWithAuth(`${API_BASE}/api/conversations/saved`);
     if (!res.ok) return [];
     const json: IApiSuccessResponse<ISavedStrangerView[]> = await res.json();
     return json.data;
   }
 
   async getConversationMessages(conversationId: string): Promise<IEncryptedMessageEnvelope[]> {
-    const res = await fetch(`${API_BASE}/api/conversations/${conversationId}/messages`, {
-      headers: this.getHeaders(),
-    });
+    const res = await this.fetchWithAuth(`${API_BASE}/api/conversations/${conversationId}/messages`);
     if (!res.ok) throw new Error('Failed to fetch conversation history');
     const json: IApiSuccessResponse<IEncryptedMessageEnvelope[]> = await res.json();
     return json.data;
   }
 
   /**
-   * Mutually deletes a saved conversation for both participants from the server.
+   * Deletes a saved conversation from the authenticated user's own saved list.
    */
   async deleteMutualSavedConnection(conversationId: string): Promise<boolean> {
-    const res = await fetch(`${API_BASE}/api/conversations/${conversationId}/saved`, {
+    const res = await this.fetchWithAuth(`${API_BASE}/api/conversations/${conversationId}/saved`, {
       method: 'DELETE',
-      headers: this.getHeaders(),
     });
     return res.ok;
   }
 
   /**
-   * Alias for deleteMutualSavedConnection
+   * Alias for deleteSavedConnection
    */
   async removeSavedStranger(conversationId: string): Promise<boolean> {
     return this.deleteMutualSavedConnection(conversationId);
   }
 
   async blockUser(targetUserId: string): Promise<void> {
-    await fetch(`${API_BASE}/api/moderation/block`, {
+    await this.fetchWithAuth(`${API_BASE}/api/moderation/block`, {
       method: 'POST',
-      headers: this.getHeaders(),
       body: JSON.stringify({ targetUserId }),
     });
   }
@@ -168,9 +163,8 @@ class ApiClient {
     reason: string,
     details?: string,
   ): Promise<void> {
-    await fetch(`${API_BASE}/api/moderation/report`, {
+    await this.fetchWithAuth(`${API_BASE}/api/moderation/report`, {
       method: 'POST',
-      headers: this.getHeaders(),
       body: JSON.stringify({ reportedUserId, conversationId, reason, details }),
     });
   }

@@ -114,6 +114,8 @@ export interface IWsSyncPayload {
 export interface IWsMatchFoundPayload {
   conversationId: ConversationId;
   partnerDisplayName: string;
+  partnerAccountType?: 'guest' | 'authenticated';
+  isSaveAvailable?: boolean;
   partnerKeyBundle?: {
     identityKey: string;
     ephemeralKey?: string;
@@ -167,6 +169,8 @@ export interface IWsSyncCompletedPayload {
   conversationId: ConversationId;
   messages: IEncryptedMessageEnvelope[];
   hasMore: boolean;
+  partnerAccountType?: 'guest' | 'authenticated';
+  isSaveAvailable?: boolean;
   /** Pending save request targeting the authenticated user, if any */
   pendingSaveRequest?: IWsSaveRequestReceivedPayload;
 }

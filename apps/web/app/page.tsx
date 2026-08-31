@@ -31,14 +31,25 @@ export default function HomePage() {
     e.preventDefault();
     setLoading(true);
     try {
-      // Clear previous guest identity when explicitly entering a fresh nickname/chat
-      if (nickname.trim() || !currentUser) {
+      if (typeof window !== 'undefined') {
+        try {
+          sessionStorage.removeItem('cs_active_conv');
+        } catch {
+          // sessionStorage not accessible
+        }
+      }
+
+      if (currentUser?.accountType === 'authenticated') {
+        // Authenticated user starts chat directly with their existing identity
+        router.push('/chat');
+      } else {
+        // Guest user starts chat with nickname
         apiClient.clearToken();
         socketClient.disconnect();
         const guest = await apiClient.createGuest(nickname.trim() || undefined);
         setCurrentUser(guest.user);
+        router.push(`/chat${nickname.trim() ? `?nickname=${encodeURIComponent(nickname.trim())}` : ''}`);
       }
-      router.push(`/chat${nickname.trim() ? `?nickname=${encodeURIComponent(nickname.trim())}` : ''}`);
     } catch (err) {
       console.error('Failed to initiate chat:', err);
     } finally {
@@ -46,7 +57,16 @@ export default function HomePage() {
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    if (typeof window !== 'undefined') {
+      try {
+        sessionStorage.removeItem('cs_active_conv');
+      } catch {
+        // sessionStorage not accessible
+      }
+    }
+    await apiClient.logout();
+    socketClient.disconnect();
     setCurrentUser(null);
   };
 

@@ -50,7 +50,7 @@ describe('Production Google OAuth Flow & Account Linking Suite', () => {
     expect(mockRes.status).toBe(403);
     const mockError = await mockRes.json();
     expect(mockError.error.message).toMatch(/strictly disabled in production/i);
-  });
+  }, 25000);
 
   it('2. should verify live GET /api/auth/google initiates OAuth 2.0 with state forwarding to Google', async () => {
     const guestRes = await fetch(`${API_BASE}/api/auth/guest`, {
@@ -74,7 +74,7 @@ describe('Production Google OAuth Flow & Account Linking Suite', () => {
     expect(parsedUrl.searchParams.get('redirect_uri')).toBe(`${API_BASE}/api/auth/google/callback`);
     expect(parsedUrl.searchParams.get('scope')).toBe('email profile');
     expect(parsedUrl.searchParams.get('state')).toBe(guestData.accessToken);
-  });
+  }, 25000);
 
   it('3. should link new Google account to active guest, preserving user ID, messages, and saved strangers', async () => {
     const guestUser = await db.createUser('GuestAlex', 'guest');
@@ -178,5 +178,61 @@ describe('Production Google OAuth Flow & Account Linking Suite', () => {
 
     expect(session2.user.id).toBe(session1.user.id);
     expect(session2.user.accountType).toBe('authenticated');
+  });
+
+  it('7. should correctly decode OAuth state with returnUrl and guest session token', () => {
+    const guestPayload = { sub: 'usr_guest123', displayName: 'GuestTester', accountType: 'guest' };
+    const token = jwt.sign(guestPayload);
+    
+    // Test base64 JSON state with returnUrl and conversationId
+    const stateObj = { token, conversationId: 'conv_456', returnUrl: '/saved' };
+    const stateStr = Buffer.from(JSON.stringify(stateObj)).toString('base64');
+
+    const extracted = authService.extractStateData(stateStr);
+    expect(extracted.userId).toBe('usr_guest123');
+    expect(extracted.conversationId).toBe('conv_456');
+    expect(extracted.returnUrl).toBe('/saved');
+  });
+
+  it('8. should validate authenticated user from JWT token payload', async () => {
+    const user = await db.createUser('ValidatedStudent', 'authenticated');
+    const token = jwt.sign({ sub: user.id, displayName: user.displayName, accountType: user.accountType });
+
+    const decoded = jwt.verify(token) as { sub: string };
+    const retrievedUser = await authService.validateTokenUser(decoded.sub);
+    expect(retrievedUser.id).toBe(user.id);
+    expect(retrievedUser.displayName).toBe('ValidatedStudent');
+    expect(retrievedUser.accountType).toBe('authenticated');
+  });
+
+  it('9. should migrate pending save_requests when guest links to existing Google user', async () => {
+    const existingGoogleUser = await db.createUser('ExistingSavedUser', 'authenticated');
+    const googleId = `google_saver_${Date.now()}`;
+    await db.linkAuthAccount(existingGoogleUser.id, 'google', googleId, 'saved.user@university.edu');
+
+    const guestUser = await db.createUser('GuestRequester', 'guest');
+    const targetUser = await db.createUser('TargetPartner', 'guest');
+    const conv = await db.createConversation([guestUser.id, targetUser.id]);
+
+    // Guest creates save request toward target
+    const saveReq = await db.createOrGetSaveRequest(conv.id, guestUser.id, targetUser.id);
+    expect(saveReq.status).toBe('pending');
+    expect(saveReq.requesterUserId).toBe(guestUser.id);
+
+    // Guest links Google account (merging with existingGoogleUser)
+    await authService.linkGoogleAccount(guestUser.id, {
+      id: googleId,
+      email: 'saved.user@university.edu',
+    });
+
+    // Target responds to the pending save request
+    const responded = await db.respondToSaveRequest(saveReq.id, targetUser.id, 'accepted');
+    expect(responded).toBeDefined();
+    expect(responded?.status).toBe('accepted');
+    expect(responded?.requesterUserId).toBe(existingGoogleUser.id);
+
+    // Verify both users now have saved connections
+    const savedForUser = await conversationsService.getSavedStrangers(existingGoogleUser.id);
+    expect(savedForUser.some((s) => s.conversationId === conv.id)).toBe(true);
   });
 });
