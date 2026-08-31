@@ -40,6 +40,13 @@ export function Navbar({ user, onOpenAuthModal, onLogout }: NavbarProps) {
 
   const handleLogout = async () => {
     setDropdownOpen(false);
+    if (typeof window !== 'undefined') {
+      try {
+        sessionStorage.removeItem('cs_active_conv');
+      } catch {
+        // sessionStorage not accessible
+      }
+    }
     await apiClient.logout();
     socketClient.disconnect();
     if (onLogout) {

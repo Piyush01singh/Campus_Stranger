@@ -84,6 +84,7 @@ class SocketClient {
     if (!this.socket) {
       this.socket = io(SOCKET_URL, {
         transports: ['websocket', 'polling'],
+        withCredentials: true,
         autoConnect: true,
         reconnection: true,
         reconnectionAttempts: 10,
@@ -133,17 +134,17 @@ class SocketClient {
 
       const sendAuth = async () => {
         const currentToken = apiClient.getToken() || token;
-        if (currentToken) {
-          try {
-            const preKeyBundle = await cryptoManager.getPreKeyBundle();
-            this.socket!.emit(WsClientEvents.AUTHENTICATE, { token: currentToken, preKeyBundle });
-          } catch (err) {
-            console.error('Failed to generate preKeyBundle on socket connect:', err);
-            this.socket!.emit(WsClientEvents.AUTHENTICATE, { token: currentToken });
-          }
-        } else {
-          clearTimeout(timer);
-          finish(this.socket!);
+        try {
+          const preKeyBundle = await cryptoManager.getPreKeyBundle();
+          this.socket!.emit(WsClientEvents.AUTHENTICATE, {
+            token: currentToken || undefined,
+            preKeyBundle,
+          });
+        } catch (err) {
+          console.error('Failed to generate preKeyBundle on socket connect:', err);
+          this.socket!.emit(WsClientEvents.AUTHENTICATE, {
+            token: currentToken || undefined,
+          });
         }
       };
 

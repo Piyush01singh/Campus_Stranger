@@ -56,8 +56,20 @@ export class AuthController {
   @Post('guest')
   async createGuest(
     @Body() dto: CreateGuestDto,
+    @Res({ passthrough: true }) res: Response,
   ): Promise<IApiSuccessResponse<AuthSessionResponse>> {
     const session = await this.authService.createGuest(dto.displayName);
+    const nodeEnv = this.configService.get<string>('nodeEnv', 'development');
+    const isProd = nodeEnv === 'production';
+
+    res.cookie('cs_auth_token', session.accessToken, {
+      httpOnly: true,
+      secure: isProd,
+      sameSite: isProd ? 'none' : 'lax',
+      maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
+      path: '/',
+    });
+
     return {
       success: true,
       data: session,
@@ -122,7 +134,7 @@ export class AuthController {
   @UseGuards(GoogleAuthGuard)
   @Get('google/callback')
   async googleAuthCallback(
-    @Req() req: { user?: GoogleValidatedUser; query?: Record<string, unknown> },
+    @Req() req: { user?: GoogleValidatedUser; query?: Record<string, unknown>; cookies?: Record<string, string>; headers?: Record<string, string> },
     @Res() res: Response,
   ) {
     const frontendUrl = this.configService.get<string>('frontendUrl', 'http://localhost:3000');
@@ -144,13 +156,30 @@ export class AuthController {
 
       const stateData = stateParam ? this.authService.extractStateData(stateParam) : {};
 
+      // Identify guest userId from OAuth state OR from incoming cs_auth_token cookie
+      let guestUserId = stateData.userId;
+      if (!guestUserId) {
+        const rawCookie = req.cookies?.cs_auth_token || req.headers?.cookie;
+        if (rawCookie) {
+          const cookieMatch = typeof rawCookie === 'string' && rawCookie.includes('cs_auth_token=')
+            ? rawCookie.match(/(?:^|;\s*)cs_auth_token=([^;]+)/)?.[1]
+            : req.cookies?.cs_auth_token;
+          if (cookieMatch) {
+            const decodedFromCookie = this.authService.extractStateData(cookieMatch);
+            if (decodedFromCookie.userId) {
+              guestUserId = decodedFromCookie.userId;
+            }
+          }
+        }
+      }
+
       const session = await this.authService.findOrCreateGoogleUser(
         {
           id: req.user.googleId,
           email: req.user.email,
           displayName: req.user.displayName,
         },
-        stateData.userId,
+        guestUserId,
       );
 
       this.logger.log(
@@ -166,17 +195,14 @@ export class AuthController {
         path: '/',
       });
 
-      const tokenParam = encodeURIComponent(session.accessToken);
-
       if (stateData.conversationId) {
         return res.redirect(
-          `${frontendUrl}/chat?auth_token=${tokenParam}&return_conv=${encodeURIComponent(stateData.conversationId)}`,
+          `${frontendUrl}/chat?return_conv=${encodeURIComponent(stateData.conversationId)}`,
         );
       } else if (stateData.returnUrl) {
-        const separator = stateData.returnUrl.includes('?') ? '&' : '?';
-        return res.redirect(`${frontendUrl}${stateData.returnUrl}${separator}auth_token=${tokenParam}`);
+        return res.redirect(`${frontendUrl}${stateData.returnUrl}`);
       } else {
-        return res.redirect(`${frontendUrl}/?auth_token=${tokenParam}`);
+        return res.redirect(`${frontendUrl}/`);
       }
     } catch (err) {
       this.logger.error(

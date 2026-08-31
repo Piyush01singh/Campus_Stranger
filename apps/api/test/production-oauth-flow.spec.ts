@@ -204,4 +204,35 @@ describe('Production Google OAuth Flow & Account Linking Suite', () => {
     expect(retrievedUser.displayName).toBe('ValidatedStudent');
     expect(retrievedUser.accountType).toBe('authenticated');
   });
+
+  it('9. should migrate pending save_requests when guest links to existing Google user', async () => {
+    const existingGoogleUser = await db.createUser('ExistingSavedUser', 'authenticated');
+    const googleId = `google_saver_${Date.now()}`;
+    await db.linkAuthAccount(existingGoogleUser.id, 'google', googleId, 'saved.user@university.edu');
+
+    const guestUser = await db.createUser('GuestRequester', 'guest');
+    const targetUser = await db.createUser('TargetPartner', 'guest');
+    const conv = await db.createConversation([guestUser.id, targetUser.id]);
+
+    // Guest creates save request toward target
+    const saveReq = await db.createOrGetSaveRequest(conv.id, guestUser.id, targetUser.id);
+    expect(saveReq.status).toBe('pending');
+    expect(saveReq.requesterUserId).toBe(guestUser.id);
+
+    // Guest links Google account (merging with existingGoogleUser)
+    await authService.linkGoogleAccount(guestUser.id, {
+      id: googleId,
+      email: 'saved.user@university.edu',
+    });
+
+    // Target responds to the pending save request
+    const responded = await db.respondToSaveRequest(saveReq.id, targetUser.id, 'accepted');
+    expect(responded).toBeDefined();
+    expect(responded?.status).toBe('accepted');
+    expect(responded?.requesterUserId).toBe(existingGoogleUser.id);
+
+    // Verify both users now have saved connections
+    const savedForUser = await conversationsService.getSavedStrangers(existingGoogleUser.id);
+    expect(savedForUser.some((s) => s.conversationId === conv.id)).toBe(true);
+  });
 });

@@ -20,14 +20,6 @@ export default function HomePage() {
   const activeUsersCount = useActiveUsersCount(1);
 
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const urlParams = new URLSearchParams(window.location.search);
-      const authToken = urlParams.get('auth_token');
-      if (authToken) {
-        apiClient.setToken(authToken);
-        window.history.replaceState({}, '', '/');
-      }
-    }
     apiClient.getMe().then((u) => setCurrentUser(u));
   }, []);
 
@@ -39,6 +31,14 @@ export default function HomePage() {
     e.preventDefault();
     setLoading(true);
     try {
+      if (typeof window !== 'undefined') {
+        try {
+          sessionStorage.removeItem('cs_active_conv');
+        } catch {
+          // sessionStorage not accessible
+        }
+      }
+
       if (currentUser?.accountType === 'authenticated') {
         // Authenticated user starts chat directly with their existing identity
         router.push('/chat');
@@ -58,6 +58,13 @@ export default function HomePage() {
   };
 
   const handleLogout = async () => {
+    if (typeof window !== 'undefined') {
+      try {
+        sessionStorage.removeItem('cs_active_conv');
+      } catch {
+        // sessionStorage not accessible
+      }
+    }
     await apiClient.logout();
     socketClient.disconnect();
     setCurrentUser(null);

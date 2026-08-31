@@ -30,15 +30,6 @@ export default function SavedStrangersPage() {
     async function loadSaved() {
       setLoading(true);
       try {
-        if (typeof window !== 'undefined') {
-          const urlParams = new URLSearchParams(window.location.search);
-          const authToken = urlParams.get('auth_token');
-          if (authToken) {
-            apiClient.setToken(authToken);
-            window.history.replaceState({}, '', '/saved');
-          }
-        }
-
         const user = await apiClient.getMe();
         setCurrentUser(user);
 

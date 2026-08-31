@@ -441,6 +441,18 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
         toUserId,
         fromUserId,
       ]);
+
+      // 6. Migrate save requests (both requester and target)
+      await this.pool.query(
+        `UPDATE save_requests SET requester_user_id = $1 WHERE requester_user_id = $2
+         ON CONFLICT (conversation_id, requester_user_id) DO NOTHING`,
+        [toUserId, fromUserId],
+      );
+      await this.pool.query(
+        `UPDATE save_requests SET target_user_id = $1 WHERE target_user_id = $2`,
+        [toUserId, fromUserId],
+      );
+      await this.pool.query(`DELETE FROM save_requests WHERE requester_user_id = $1`, [fromUserId]);
       return;
     }
 
@@ -525,6 +537,16 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
       }
       if (report.reportedUserId === fromUserId) {
         report.reportedUserId = toUserId;
+      }
+    }
+
+    // Migrate save requests in memory
+    for (const saveReq of this.memSaveRequests.values()) {
+      if (saveReq.requesterUserId === fromUserId) {
+        saveReq.requesterUserId = toUserId;
+      }
+      if (saveReq.targetUserId === fromUserId) {
+        saveReq.targetUserId = toUserId;
       }
     }
   }

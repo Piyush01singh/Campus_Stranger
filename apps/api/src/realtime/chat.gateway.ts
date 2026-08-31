@@ -124,7 +124,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
   @SubscribeMessage(WsClientEvents.AUTHENTICATE)
   async handleAuthenticate(
     @ConnectedSocket() client: AuthenticatedSocket,
-    @MessageBody() payload: { token: string; preKeyBundle?: { identityKey: string; signedPreKey: string; signedPreKeySignature?: string } },
+    @MessageBody() payload?: { token?: string; preKeyBundle?: { identityKey: string; signedPreKey: string; signedPreKeySignature?: string } },
   ) {
     const authPromise = (async () => {
       // Rate limit socket authentication attempts (max 10 attempts per 10 seconds)
@@ -134,8 +134,23 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         return;
       }
 
+      // Extract token from message payload, socket auth handshake, or HttpOnly cookie header
+      let token = payload?.token || (client.handshake?.auth?.token as string | undefined);
+      if (!token && client.handshake?.headers?.cookie) {
+        const rawCookie = client.handshake.headers.cookie;
+        const match = rawCookie.match(/(?:^|;\s*)(?:cs_auth_token|session_token)=([^;]+)/);
+        if (match) {
+          token = decodeURIComponent(match[1]);
+        }
+      }
+
+      if (!token) {
+        client.emit(WsServerEvents.CHAT_ERROR, { code: 'UNAUTHORIZED', message: 'No session token or cookie provided' });
+        return;
+      }
+
       try {
-        const decoded = this.jwtService.verify(payload.token);
+        const decoded = this.jwtService.verify(token);
         const user = await this.db.findUserById(toUserId(decoded.sub));
 
         if (!user) {
@@ -143,8 +158,19 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
           return;
         }
 
+        // Clean up old user mappings if socket identity is transitioning (e.g. guest -> authenticated)
+        if (client.data.user && client.data.user.id !== user.id) {
+          const oldUserId = client.data.user.id;
+          const oldSockets = this.userSockets.get(oldUserId);
+          if (oldSockets) {
+            oldSockets.delete(client.id);
+            if (oldSockets.size === 0) this.userSockets.delete(oldUserId);
+          }
+          await this.redis.unregisterSocket(oldUserId, client.id);
+        }
+
         client.data.user = user;
-        if (payload.preKeyBundle) {
+        if (payload?.preKeyBundle) {
           client.data.preKeyBundle = payload.preKeyBundle;
         }
 

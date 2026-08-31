@@ -39,38 +39,16 @@ class ApiClient {
     });
   }
 
-  setToken(token: string) {
+  setToken(token: string | null) {
     this.inMemoryToken = token;
-    if (typeof window !== 'undefined') {
-      try {
-        localStorage.setItem('cs_auth_token', token);
-      } catch {
-        // localStorage not accessible
-      }
-    }
   }
 
   getToken(): string | null {
-    if (typeof window !== 'undefined') {
-      try {
-        const stored = localStorage.getItem('cs_auth_token');
-        if (stored) return stored;
-      } catch {
-        // localStorage not accessible
-      }
-    }
     return this.inMemoryToken;
   }
 
   clearToken() {
     this.inMemoryToken = null;
-    if (typeof window !== 'undefined') {
-      try {
-        localStorage.removeItem('cs_auth_token');
-      } catch {
-        // localStorage not accessible
-      }
-    }
   }
 
   async createGuest(displayName?: string): Promise<{ user: IUser; accessToken: string }> {
