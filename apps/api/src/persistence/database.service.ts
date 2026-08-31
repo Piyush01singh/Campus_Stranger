@@ -848,11 +848,23 @@ export class DatabaseService implements OnModuleInit, OnModuleDestroy {
         `DELETE FROM saved_connections WHERE user_id = $1 AND conversation_id = $2`,
         [userId, conversationId],
       );
+      await this.pool.query(
+        `UPDATE conversation_members SET saved_at = NULL WHERE user_id = $1 AND conversation_id = $2`,
+        [userId, conversationId],
+      );
       return (res.rowCount ?? 0) > 0;
     }
     const userSaved = this.memSavedConnections.get(userId);
-    if (!userSaved) return false;
-    return userSaved.delete(conversationId);
+    let deleted = false;
+    if (userSaved) {
+      deleted = userSaved.delete(conversationId);
+    }
+    const memList = this.memConversationMembers.get(conversationId) ?? [];
+    const mem = memList.find((m) => m.userId === userId);
+    if (mem) {
+      mem.savedAt = undefined;
+    }
+    return deleted;
   }
 
   // --- Moderation (Blocks & Reports) ---

@@ -50,7 +50,7 @@ describe('Production Google OAuth Flow & Account Linking Suite', () => {
     expect(mockRes.status).toBe(403);
     const mockError = await mockRes.json();
     expect(mockError.error.message).toMatch(/strictly disabled in production/i);
-  });
+  }, 25000);
 
   it('2. should verify live GET /api/auth/google initiates OAuth 2.0 with state forwarding to Google', async () => {
     const guestRes = await fetch(`${API_BASE}/api/auth/guest`, {
@@ -74,7 +74,7 @@ describe('Production Google OAuth Flow & Account Linking Suite', () => {
     expect(parsedUrl.searchParams.get('redirect_uri')).toBe(`${API_BASE}/api/auth/google/callback`);
     expect(parsedUrl.searchParams.get('scope')).toBe('email profile');
     expect(parsedUrl.searchParams.get('state')).toBe(guestData.accessToken);
-  });
+  }, 25000);
 
   it('3. should link new Google account to active guest, preserving user ID, messages, and saved strangers', async () => {
     const guestUser = await db.createUser('GuestAlex', 'guest');

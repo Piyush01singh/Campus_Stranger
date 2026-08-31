@@ -7,6 +7,7 @@ export interface MatchCandidate {
   userId: UserId;
   socketId: string;
   displayName: string;
+  accountType?: 'guest' | 'authenticated';
   preKeyBundle?: {
     identityKey: string;
     signedPreKey: string;

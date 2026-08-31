@@ -247,6 +247,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       userId: user.id,
       socketId: client.id,
       displayName: user.displayName,
+      accountType: user.accountType,
       preKeyBundle,
       joinedAt: Date.now(),
     });
@@ -254,6 +255,10 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     if (match) {
       const { conversation, userA, userB } = match;
       const room = `conv_${conversation.id}`;
+
+      // Save is available only when both participants are authenticated
+      const isSaveAvailable =
+        userA.accountType === 'authenticated' && userB.accountType === 'authenticated';
 
       // Cross-Node Room Join and Match Emission via Redis Adapter
       if (this.server) {
@@ -265,6 +270,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         const payloadA: IWsMatchFoundPayload = {
           conversationId: conversation.id,
           partnerDisplayName: userB.displayName,
+          partnerAccountType: userB.accountType,
+          isSaveAvailable,
           partnerKeyBundle: userB.preKeyBundle
             ? { identityKey: userB.preKeyBundle.identityKey, ephemeralKey: userB.preKeyBundle.signedPreKey }
             : undefined,
@@ -275,6 +282,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
         const payloadB: IWsMatchFoundPayload = {
           conversationId: conversation.id,
           partnerDisplayName: userA.displayName,
+          partnerAccountType: userA.accountType,
+          isSaveAvailable,
           partnerKeyBundle: userA.preKeyBundle
             ? { identityKey: userA.preKeyBundle.identityKey, ephemeralKey: userA.preKeyBundle.signedPreKey }
             : undefined,
@@ -626,6 +635,21 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     client.join(`conv_${convId}`);
     client.data.activeConversationId = convId;
 
+    // Resolve partner account type and calculate if save is available
+    const members = await this.db.getConversationMembers(convId);
+    const partnerMember = members.find((m) => m.userId !== user.id);
+    let partnerAccountType: 'guest' | 'authenticated' | undefined;
+    let isSaveAvailable = false;
+
+    if (partnerMember) {
+      const partnerUser = await this.db.findUserById(partnerMember.userId);
+      if (partnerUser) {
+        partnerAccountType = partnerUser.accountType;
+        isSaveAvailable =
+          user.accountType === 'authenticated' && partnerUser.accountType === 'authenticated';
+      }
+    }
+
     // Include any pending save request targeting this user for reconnect sync
     let pendingSaveRequest: IWsSaveRequestReceivedPayload | undefined;
     const pendingReq = await this.db.getPendingSaveRequestForConversation(convId, user.id);
@@ -645,6 +669,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
       conversationId: convId,
       messages,
       hasMore: false,
+      partnerAccountType,
+      isSaveAvailable,
       pendingSaveRequest,
     };
     client.emit(WsServerEvents.SYNC_COMPLETED, syncResp);
@@ -665,8 +691,8 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   /**
    * User A initiates a save request toward User B.
+   * Authorization: BOTH users must be authenticated, verified members, not blocked.
    * Idempotent: returns existing pending request if one exists.
-   * Authorization: verified member of conversation, not blocked.
    */
   @SubscribeMessage(WsClientEvents.SAVE_REQUEST)
   async handleSaveRequest(
@@ -676,6 +702,15 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const user = client.data.user;
     if (!user || !payload?.conversationId) {
       client.emit(WsServerEvents.CHAT_ERROR, { code: 'UNAUTHORIZED', message: 'Authentication required to save' });
+      return;
+    }
+
+    // Requester must be authenticated
+    if (user.accountType !== 'authenticated') {
+      client.emit(WsServerEvents.CHAT_ERROR, {
+        code: 'FORBIDDEN',
+        message: 'Save Chat is only available for authenticated accounts',
+      });
       return;
     }
 
@@ -696,6 +731,16 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const partnerMember = members.find((m) => m.userId !== user.id);
     if (!partnerMember) {
       client.emit(WsServerEvents.CHAT_ERROR, { code: 'FORBIDDEN', message: 'No partner in this conversation' });
+      return;
+    }
+
+    // Target partner must also be authenticated
+    const partnerUser = await this.db.findUserById(partnerMember.userId);
+    if (!partnerUser || partnerUser.accountType !== 'authenticated') {
+      client.emit(WsServerEvents.CHAT_ERROR, {
+        code: 'FORBIDDEN',
+        message: 'Save Chat requires both participants to be authenticated',
+      });
       return;
     }
 
@@ -743,7 +788,7 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
 
   /**
    * User B responds to a pending save request (accept or decline).
-   * Authorization: only the target user of the request may respond.
+   * Authorization: only the target user of the request may respond. Both must be authenticated.
    * On accept: both users' saved_connections are created atomically.
    */
   @SubscribeMessage(WsClientEvents.SAVE_RESPOND)
@@ -754,6 +799,14 @@ export class ChatGateway implements OnGatewayConnection, OnGatewayDisconnect {
     const user = client.data.user;
     if (!user || !payload?.conversationId || !payload?.response) {
       client.emit(WsServerEvents.CHAT_ERROR, { code: 'UNAUTHORIZED', message: 'Authentication required' });
+      return;
+    }
+
+    if (user.accountType !== 'authenticated') {
+      client.emit(WsServerEvents.CHAT_ERROR, {
+        code: 'FORBIDDEN',
+        message: 'Only authenticated users can respond to save requests',
+      });
       return;
     }
 

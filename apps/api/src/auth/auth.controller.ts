@@ -44,6 +44,23 @@ export class MockLinkGoogleDto {
   displayName?: string;
 }
 
+export class TestLoginDto {
+  @IsString()
+  @IsOptional()
+  @MaxLength(50)
+  displayName?: string;
+
+  @IsEmail()
+  @IsOptional()
+  @MaxLength(255)
+  email?: string;
+
+  @IsString()
+  @IsOptional()
+  @MaxLength(100)
+  googleId?: string;
+}
+
 @Controller('auth')
 export class AuthController {
   private readonly logger = new Logger(AuthController.name);
@@ -234,6 +251,44 @@ export class AuthController {
       email: dto.email,
       displayName: dto.displayName,
     });
+    return {
+      success: true,
+      data: session,
+      timestamp: new Date().toISOString(),
+    };
+  }
+
+  /**
+   * Safe development & automated testing login endpoint.
+   * Directly authenticates as a named user and issues standard HttpOnly session cookie.
+   * Strictly disabled in production.
+   */
+  @Post('test-login')
+  async testLogin(
+    @Body() dto: TestLoginDto,
+    @Res({ passthrough: true }) res: Response,
+  ): Promise<IApiSuccessResponse<AuthSessionResponse>> {
+    const nodeEnv = this.configService.get<string>('nodeEnv', 'development');
+    if (nodeEnv === 'production') {
+      throw new ForbiddenException(
+        'Test login endpoint is strictly disabled in production environments.',
+      );
+    }
+
+    const session = await this.authService.createTestAuthenticatedUser(
+      dto.displayName,
+      dto.email,
+      dto.googleId,
+    );
+
+    res.cookie('cs_auth_token', session.accessToken, {
+      httpOnly: true,
+      secure: false,
+      sameSite: 'lax',
+      maxAge: 30 * 24 * 60 * 60 * 1000,
+      path: '/',
+    });
+
     return {
       success: true,
       data: session,

@@ -113,6 +113,20 @@ class ApiClient {
     return `${API_BASE}/api/auth/google${token ? `?state=${encodeURIComponent(token)}` : ''}`;
   }
 
+  /**
+   * Safe development and test login helper. Disabled in production.
+   */
+  async testLogin(displayName?: string, email?: string, googleId?: string): Promise<{ user: IUser; accessToken: string }> {
+    const res = await this.fetchWithAuth(`${API_BASE}/api/auth/test-login`, {
+      method: 'POST',
+      body: JSON.stringify({ displayName, email, googleId }),
+    });
+    if (!res.ok) throw new Error('Failed to perform dev test login');
+    const json: IApiSuccessResponse<{ user: IUser; accessToken: string }> = await res.json();
+    this.setToken(json.data.accessToken);
+    return json.data;
+  }
+
   async getSavedStrangers(): Promise<ISavedStrangerView[]> {
     const res = await this.fetchWithAuth(`${API_BASE}/api/conversations/saved`);
     if (!res.ok) return [];
@@ -128,7 +142,7 @@ class ApiClient {
   }
 
   /**
-   * Mutually deletes a saved conversation for both participants from the server.
+   * Deletes a saved conversation from the authenticated user's own saved list.
    */
   async deleteMutualSavedConnection(conversationId: string): Promise<boolean> {
     const res = await this.fetchWithAuth(`${API_BASE}/api/conversations/${conversationId}/saved`, {
@@ -138,7 +152,7 @@ class ApiClient {
   }
 
   /**
-   * Alias for deleteMutualSavedConnection
+   * Alias for deleteSavedConnection
    */
   async removeSavedStranger(conversationId: string): Promise<boolean> {
     return this.deleteMutualSavedConnection(conversationId);

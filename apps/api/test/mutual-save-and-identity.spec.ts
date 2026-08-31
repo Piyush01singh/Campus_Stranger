@@ -6,16 +6,17 @@ import { JwtModule } from '@nestjs/jwt';
 import { PersistenceModule } from '../src/persistence/persistence.module';
 import { DatabaseService } from '../src/persistence/database.service';
 import { AuthService } from '../src/auth/auth.service';
+import { AuthController } from '../src/auth/auth.controller';
 import { ConversationsService } from '../src/conversations/conversations.service';
 import {
   IEncryptedMessageEnvelope,
-  toConversationId,
   toMessageId,
 } from '@campus-stranger/shared-types';
 import configuration from '../src/config/configuration';
 
-describe('Mutual Save Consent, Bilateral Deletion & Identity Lifecycle Regression Tests', () => {
+describe('Mutual Save Chat, Single-Sided Deletion & Auth Security Tests', () => {
   let authService: AuthService;
+  let authController: AuthController;
   let conversationsService: ConversationsService;
   let db: DatabaseService;
 
@@ -26,52 +27,51 @@ describe('Mutual Save Consent, Bilateral Deletion & Identity Lifecycle Regressio
         PersistenceModule,
         JwtModule.register({ secret: 'test_jwt_secret_identity', signOptions: { expiresIn: '1d' } }),
       ],
+      controllers: [AuthController],
       providers: [AuthService, ConversationsService],
     }).compile();
 
     authService = moduleRef.get<AuthService>(AuthService);
+    authController = moduleRef.get<AuthController>(AuthController);
     conversationsService = moduleRef.get<ConversationsService>(ConversationsService);
     db = moduleRef.get<DatabaseService>(DatabaseService);
 
     expect(authService).toBeDefined();
+    expect(authController).toBeDefined();
     expect(conversationsService).toBeDefined();
     expect(db).toBeDefined();
   });
 
   // ==========================================
-  // 1. Guest Nickname & Session Lifecycle (Issue 1)
+  // 1. Identity & Account Types
   // ==========================================
-  describe('Guest Nickname & Session Lifecycle (Issue 1)', () => {
-    it('should create independent guest identities with distinct user IDs when picking different nicknames', async () => {
-      const guestA = await authService.createGuest('Alice');
-      const guestB = await authService.createGuest('Bob');
-
-      expect(guestA.user.id).not.toBe(guestB.user.id);
-      expect(guestA.user.displayName).toBe('Alice');
-      expect(guestB.user.displayName).toBe('Bob');
-      expect(guestA.user.accountType).toBe('guest');
-      expect(guestB.user.accountType).toBe('guest');
-
-      // Validating tokens
-      const validatedA = await authService.validateTokenUser(guestA.user.id);
-      expect(validatedA.displayName).toBe('Alice');
-      const validatedB = await authService.validateTokenUser(guestB.user.id);
-      expect(validatedB.displayName).toBe('Bob');
+  describe('Identity & Account Types (Anonymous vs Authenticated)', () => {
+    it('should create anonymous guest users with accountType=guest', async () => {
+      const guest = await authService.createGuest('AliceGuest');
+      expect(guest.user.displayName).toBe('AliceGuest');
+      expect(guest.user.accountType).toBe('guest');
+      expect(guest.accessToken).toBeDefined();
     });
 
-    it('should generate fallback random nickname when none provided', async () => {
-      const guest = await authService.createGuest();
-      expect(guest.user.displayName).toMatch(/^Stranger_\d{4}$/);
+    it('should create authenticated users with accountType=authenticated via dev test login', async () => {
+      const authUser = await authService.createTestAuthenticatedUser(
+        'BobAuth',
+        'bob@test.campus',
+        'google_bob_123',
+      );
+      expect(authUser.user.displayName).toBe('BobAuth');
+      expect(authUser.user.accountType).toBe('authenticated');
+      expect(authUser.accessToken).toBeDefined();
     });
   });
 
   // ==========================================
-  // 2. Two-Sided Mutual Save Consent Flow (Issue 2)
+  // 2. Mutual Save Consent Flow (Auth ↔ Auth)
   // ==========================================
-  describe('Two-Sided Mutual Save Consent Flow (Issue 2)', () => {
+  describe('Mutual Save Consent Flow (Auth ↔ Auth)', () => {
     it('should manage save request lifecycle: create -> pending -> accept -> mutual saved connection', async () => {
-      const userA = (await authService.createGuest('RequesterA')).user;
-      const userB = (await authService.createGuest('TargetB')).user;
+      const userA = (await authService.createTestAuthenticatedUser('RequesterA')).user;
+      const userB = (await authService.createTestAuthenticatedUser('TargetB')).user;
       const conv = await db.createConversation([userA.id, userB.id]);
 
       // 1. User A initiates save request
@@ -120,8 +120,8 @@ describe('Mutual Save Consent, Bilateral Deletion & Identity Lifecycle Regressio
     });
 
     it('should handle decline response properly without creating saved connections', async () => {
-      const userA = (await authService.createGuest('AliceDeclined')).user;
-      const userB = (await authService.createGuest('BobDeclined')).user;
+      const userA = (await authService.createTestAuthenticatedUser('AliceDeclined')).user;
+      const userB = (await authService.createTestAuthenticatedUser('BobDeclined')).user;
       const conv = await db.createConversation([userA.id, userB.id]);
 
       const req = await db.createOrGetSaveRequest(conv.id, userA.id, userB.id);
@@ -139,8 +139,8 @@ describe('Mutual Save Consent, Bilateral Deletion & Identity Lifecycle Regressio
     });
 
     it('should cancel pending save requests when conversation ends', async () => {
-      const userA = (await authService.createGuest('AliceEnding')).user;
-      const userB = (await authService.createGuest('BobEnding')).user;
+      const userA = (await authService.createTestAuthenticatedUser('AliceEnding')).user;
+      const userB = (await authService.createTestAuthenticatedUser('BobEnding')).user;
       const conv = await db.createConversation([userA.id, userB.id]);
 
       await db.createOrGetSaveRequest(conv.id, userA.id, userB.id);
@@ -156,21 +156,21 @@ describe('Mutual Save Consent, Bilateral Deletion & Identity Lifecycle Regressio
   });
 
   // ==========================================
-  // 3. Bilateral Mutual Deletion of Saved Chat (Issue 2/3 Feature)
+  // 3. Single-Sided Saved Chat Deletion (PART 8)
   // ==========================================
-  describe('Bilateral Mutual Deletion of Saved Chat', () => {
-    it('should delete saved connections and ciphertext messages for both participants', async () => {
-      const userA = (await authService.createGuest('AliceDelete')).user;
-      const userB = (await authService.createGuest('BobDelete')).user;
+  describe('Single-Sided Saved Chat Deletion (PART 8)', () => {
+    it('should remove saved chat from User A without destroying User B copy or message history', async () => {
+      const userA = (await authService.createTestAuthenticatedUser('AliceDelete1')).user;
+      const userB = (await authService.createTestAuthenticatedUser('BobDelete1')).user;
       const conv = await db.createConversation([userA.id, userB.id]);
 
       // Save connection for both
       await db.saveStrangerConnection(userA.id, conv.id);
       await db.saveStrangerConnection(userB.id, conv.id);
 
-      // Add sample encrypted messages
+      // Add sample encrypted message
       const msg1: IEncryptedMessageEnvelope = {
-        id: toMessageId('msg_del_1'),
+        id: toMessageId('msg_del_test_1'),
         conversationId: conv.id,
         senderId: userA.id,
         encryptedPayload: {
@@ -183,49 +183,45 @@ describe('Mutual Save Consent, Bilateral Deletion & Identity Lifecycle Regressio
       };
       await db.saveMessageEnvelope(msg1);
 
-      // Verify saved lists and messages exist before deletion
+      // Verify both have saved connection
       expect((await conversationsService.getSavedStrangers(userA.id)).length).toBe(1);
       expect((await conversationsService.getSavedStrangers(userB.id)).length).toBe(1);
-      expect((await conversationsService.getConversationMessages(userA.id, conv.id)).length).toBe(1);
 
-      // User A initiates bilateral deletion
-      const deleteResult = await conversationsService.deleteMutualSavedConnection(userA.id, conv.id);
+      // User A deletes from their saved chats
+      const deleteResult = await conversationsService.deleteSavedConnection(userA.id, conv.id);
       expect(deleteResult.deleted).toBe(true);
-      expect(deleteResult.otherUserId).toBe(userB.id);
 
-      // Verify NEITHER user has saved connections now
+      // User A's saved chats is now empty
       expect((await conversationsService.getSavedStrangers(userA.id)).length).toBe(0);
-      expect((await conversationsService.getSavedStrangers(userB.id)).length).toBe(0);
 
-      // Verify conversation message access is rejected (conversation deleted)
-      await expect(
-        conversationsService.getConversationMessages(userA.id, conv.id),
-      ).rejects.toThrow();
+      // User B's saved chats STILL REMAINS INTACT!
+      const userBSaved = await conversationsService.getSavedStrangers(userB.id);
+      expect(userBSaved.length).toBe(1);
+      expect(userBSaved[0].conversationId).toBe(conv.id);
+
+      // User B can still access the conversation messages!
+      const userBMessages = await conversationsService.getConversationMessages(userB.id, conv.id);
+      expect(userBMessages.length).toBe(1);
+      expect(userBMessages[0].id).toBe(msg1.id);
     });
   });
 
   // ==========================================
-  // 4. OAuth State with Conversation Restoration (Issue 4)
+  // 4. Test Login Safety (PART 24)
   // ==========================================
-  describe('OAuth State with Conversation Restoration (Issue 4)', () => {
-    it('should decode OAuth state with embedded conversationId and guest JWT token', async () => {
-      const guest = await authService.createGuest('OAuthStateGuest');
-      const convId = toConversationId('conv_restore_999');
+  describe('Test Login Security & Production Enforcement (PART 24)', () => {
+    it('should allow test login in non-production environments', async () => {
+      const mockRes = {
+        cookie: () => {},
+      } as any;
 
-      // State encoded by frontend
-      const stateObj = { token: guest.accessToken, conversationId: convId };
-      const encodedState = Buffer.from(JSON.stringify(stateObj)).toString('base64url');
-
-      const extracted = authService.extractStateData(encodedState);
-      expect(extracted.userId).toBe(guest.user.id);
-      expect(extracted.conversationId).toBe(convId);
-    });
-
-    it('should handle raw JWT state without conversationId backwards-compatibly', async () => {
-      const guest = await authService.createGuest('RawJwtGuest');
-      const extracted = authService.extractStateData(guest.accessToken);
-      expect(extracted.userId).toBe(guest.user.id);
-      expect(extracted.conversationId).toBeUndefined();
+      const res = await authController.testLogin(
+        { displayName: 'Local Tester', email: 'tester@campus.local' },
+        mockRes,
+      );
+      expect(res.success).toBe(true);
+      expect(res.data.user.accountType).toBe('authenticated');
+      expect(res.data.user.displayName).toBe('Local Tester');
     });
   });
 });

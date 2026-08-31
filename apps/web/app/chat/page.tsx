@@ -14,7 +14,6 @@ import {
   IWsMatchFoundPayload,
   IWsSaveRequestReceivedPayload,
   ReportReason,
-  toConversationId,
 } from '@campus-stranger/shared-types';
 
 const ACTIVE_CONV_STORAGE_KEY = 'cs_active_conv';
@@ -23,7 +22,6 @@ function ChatContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const nicknameParam = searchParams.get('nickname');
-  const returnConvParam = searchParams.get('return_conv');
 
   const [currentUser, setCurrentUser] = useState<IUser | null>(null);
   const [matchState, setMatchState] = useState<'idle' | 'searching' | 'matched' | 'ended'>('searching');
@@ -102,10 +100,13 @@ function ChatContent() {
       setIsSaveRequestPending(false);
     });
 
-    // G. Sync Completed (Restores messages & pending save request state)
+    // G. Sync Completed (Restores messages, partner status & pending save request state)
     const unsubSync = socketClient.onSyncCompleted((payload) => {
       if (payload.pendingSaveRequest) {
         setIncomingSaveRequest(payload.pendingSaveRequest);
+      }
+      if (payload.isSaveAvailable !== undefined) {
+        setActiveConversation((prev) => (prev ? { ...prev, isSaveAvailable: payload.isSaveAvailable } : null));
       }
     });
 
@@ -127,13 +128,6 @@ function ChatContent() {
 
     async function initLifecycle() {
       try {
-        // Read return conversation parameter if returning from OAuth
-        let targetReturnConv = returnConvParam;
-        if (typeof window !== 'undefined' && !targetReturnConv) {
-          const urlParams = new URLSearchParams(window.location.search);
-          targetReturnConv = urlParams.get('return_conv');
-        }
-
         // 1. Hydrate authentication state from server session cookie
         let user = await apiClient.getMe();
         if (!user) {
@@ -145,60 +139,25 @@ function ChatContent() {
         // 2. Connect & Authenticate WebSocket
         await socketClient.connect();
 
-        // 3. Determine if restoring conversation or starting matchmaking
-        if (targetReturnConv) {
-          // Clean up URL query parameters without triggering router teardown
-          if (typeof window !== 'undefined') {
-            window.history.replaceState({}, '', '/chat');
+        // 3. Check for active conversation in sessionStorage on page reload (F5)
+        let storedConv: IWsMatchFoundPayload | null = null;
+        if (typeof window !== 'undefined') {
+          try {
+            const raw = sessionStorage.getItem(ACTIVE_CONV_STORAGE_KEY);
+            if (raw) storedConv = JSON.parse(raw);
+          } catch {
+            // sessionStorage error
           }
+        }
 
-          const convId = toConversationId(targetReturnConv);
-          const restoredPayload: IWsMatchFoundPayload = {
-            conversationId: convId,
-            partnerDisplayName: 'Stranger',
-            matchedAt: new Date().toISOString(),
-          };
-
-          setActiveConversation(restoredPayload);
+        if (storedConv?.conversationId) {
+          setActiveConversation(storedConv);
           setMatchState('matched');
-
-          if (typeof window !== 'undefined') {
-            try {
-              sessionStorage.setItem(ACTIVE_CONV_STORAGE_KEY, JSON.stringify(restoredPayload));
-            } catch {
-              // sessionStorage not accessible
-            }
-          }
-
-          // Sync conversation history from server
-          socketClient.sync(convId);
-
-          // Auto-dispatch save request if returning authenticated from Google OAuth
-          if (user.accountType === 'authenticated') {
-            socketClient.sendSaveRequest(convId);
-            setIsSaveRequestPending(true);
-          }
+          socketClient.sync(storedConv.conversationId);
         } else {
-          // Check for active conversation in sessionStorage on page reload (F5)
-          let storedConv: IWsMatchFoundPayload | null = null;
-          if (typeof window !== 'undefined') {
-            try {
-              const raw = sessionStorage.getItem(ACTIVE_CONV_STORAGE_KEY);
-              if (raw) storedConv = JSON.parse(raw);
-            } catch {
-              // sessionStorage error
-            }
-          }
-
-          if (storedConv?.conversationId) {
-            setActiveConversation(storedConv);
-            setMatchState('matched');
-            socketClient.sync(storedConv.conversationId);
-          } else {
-            // Fresh matchmaking
-            await socketClient.joinMatchmaking();
-            setMatchState('searching');
-          }
+          // Fresh matchmaking
+          await socketClient.joinMatchmaking();
+          setMatchState('searching');
         }
       } catch (err) {
         console.error('Error during chat lifecycle initialization:', err);
@@ -206,7 +165,7 @@ function ChatContent() {
     }
 
     initLifecycle();
-  }, [nicknameParam, returnConvParam]);
+  }, [nicknameParam]);
 
   const handleNextStranger = () => {
     if (typeof window !== 'undefined') {
@@ -324,7 +283,9 @@ function ChatContent() {
             partnerDisplayName={activeConversation.partnerDisplayName}
             incomingSaveRequest={incomingSaveRequest}
             isMutualSaved={isMutualSaved}
+            isSaveAvailable={Boolean(activeConversation.isSaveAvailable)}
             isSaveRequestPending={isSaveRequestPending}
+            onSendSaveRequest={handleSendSaveRequest}
             onAcceptSaveRequest={handleAcceptSaveRequest}
             onDeclineSaveRequest={handleDeclineSaveRequest}
             onNextStranger={handleNextStranger}
@@ -363,11 +324,7 @@ function ChatContent() {
       <SaveStrangerModal
         isOpen={saveModalOpen}
         onClose={() => setSaveModalOpen(false)}
-        conversationId={activeConversation?.conversationId}
         currentUser={currentUser}
-        partnerDisplayName={activeConversation?.partnerDisplayName}
-        onSendSaveRequest={handleSendSaveRequest}
-        isSaveRequestPending={isSaveRequestPending}
         onSuccess={(u) => setCurrentUser(u)}
       />
 

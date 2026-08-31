@@ -102,10 +102,10 @@ export default function SavedStrangersPage() {
             </Link>
             <div>
               <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-neutral-900 dark:text-neutral-100">
-                Saved Strangers
+                Saved Chats
               </h1>
               <p className="text-xs sm:text-sm text-neutral-500 dark:text-neutral-400">
-                Persistent end-to-end encrypted conversations with mutual consent.
+                Persistent end-to-end encrypted conversations saved with mutual consent.
               </p>
             </div>
           </div>
@@ -119,16 +119,16 @@ export default function SavedStrangersPage() {
           </Link>
         </div>
 
-        {/* Guest Warning / CTA Banner */}
-        {currentUser && currentUser.accountType === 'guest' && (
+        {/* Guest / Anonymous Warning Banner */}
+        {(!currentUser || currentUser.accountType === 'guest') && (
           <div className="p-4 sm:p-5 rounded-3xl bg-amber-50 dark:bg-amber-950/20 border border-amber-200/60 dark:border-amber-900/40 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
             <div className="space-y-1">
               <h4 className="text-xs sm:text-sm font-bold text-amber-800 dark:text-amber-400 flex items-center gap-1.5">
                 <Sparkles className="w-4 h-4" />
-                <span>You are browsing as Guest</span>
+                <span>Sign in to access Saved Chats</span>
               </h4>
               <p className="text-xs text-amber-700/80 dark:text-amber-400/70">
-                Sign in with Google to permanently link your saved strangers and sync securely across devices.
+                Sign in with Google to view and manage your mutually saved conversations across devices.
               </p>
             </div>
             <button
@@ -151,9 +151,9 @@ export default function SavedStrangersPage() {
               <Bookmark className="w-7 h-7" />
             </div>
             <div className="space-y-1">
-              <h3 className="text-lg font-bold text-neutral-900 dark:text-neutral-100">No Saved Strangers Yet</h3>
+              <h3 className="text-lg font-bold text-neutral-900 dark:text-neutral-100">No Saved Chats Yet</h3>
               <p className="text-xs sm:text-sm text-neutral-500 dark:text-neutral-400 max-w-sm mx-auto leading-relaxed">
-                When chatting with someone you connect with, click &quot;Save Stranger&quot; to initiate mutual saving of your encrypted conversation.
+                When chatting with another authenticated student, click &quot;Save Chat&quot;. When both of you accept, the conversation is saved here.
               </p>
             </div>
             <div className="pt-2">
@@ -197,7 +197,7 @@ export default function SavedStrangersPage() {
 
                   <button
                     onClick={() => confirmDelete(item.conversationId, item.partnerDisplayName)}
-                    title="Delete saved conversation"
+                    title="Delete from saved chats"
                     aria-label={`Delete saved connection with ${item.partnerDisplayName}`}
                     className="p-2 rounded-full text-neutral-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors"
                   >
@@ -225,7 +225,7 @@ export default function SavedStrangersPage() {
         )}
       </main>
 
-      {/* Mutual Deletion Confirmation Modal */}
+      {/* Deletion Confirmation Modal */}
       {deletingConvId && (
         <div
           role="dialog"
@@ -239,17 +239,13 @@ export default function SavedStrangersPage() {
                 <AlertTriangle className="w-5 h-5" />
               </div>
               <h3 className="text-lg font-bold text-neutral-900 dark:text-neutral-100">
-                Delete Saved Conversation?
+                Remove from Saved Chats?
               </h3>
             </div>
 
             <p className="text-xs text-neutral-600 dark:text-neutral-400 leading-relaxed">
-              Deleting this saved chat with <strong>{deletingPartnerName}</strong> removes the saved connection and erases encrypted message history from the server for both of you.
+              This will remove this conversation with <strong>{deletingPartnerName}</strong> from your saved chats list.
             </p>
-
-            <div className="p-3 rounded-2xl bg-neutral-100 dark:bg-neutral-800/60 text-[11px] text-neutral-500 dark:text-neutral-400">
-              Note: Server-side stored ciphertext is erased immediately. Local client caches on offline devices will be unlinked upon reconnection.
-            </div>
 
             <div className="flex items-center justify-end gap-2.5 pt-2">
               <button
@@ -265,7 +261,7 @@ export default function SavedStrangersPage() {
                 disabled={deleteLoading}
                 className="px-5 py-2 rounded-full bg-red-600 hover:bg-red-700 active:scale-95 text-white text-xs font-semibold shadow-sm transition-all disabled:opacity-50"
               >
-                {deleteLoading ? 'Deleting...' : 'Delete for Both'}
+                {deleteLoading ? 'Removing...' : 'Remove from My Chats'}
               </button>
             </div>
           </div>

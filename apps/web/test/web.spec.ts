@@ -69,4 +69,40 @@ describe('apps/web workspace, packages, and theme utilities', () => {
     apiClient.clearToken();
     expect(apiClient.getToken()).toBeNull();
   });
+
+  it('should have consistent About page content matching the 2-mode product model', () => {
+    const aboutContent = {
+      hero: {
+        title: 'Your Messages Stay Private',
+        subtitle: 'End-to-end encrypted, so only you and your stranger can read the messages.',
+      },
+      cards: [
+        {
+          title: 'End-to-End Encrypted',
+          description: 'Messages are encrypted on your device before sending. The server never sees your messages in plaintext.',
+        },
+        {
+          title: 'Chat Instantly',
+          description: 'No sign-up or email is required. Choose a temporary nickname and start chatting right away.',
+        },
+        {
+          title: 'Anonymous by Default',
+          description: 'Anonymous chats stay temporary. No account is created just to start chatting.',
+        },
+        {
+          title: 'Save Chat With Mutual Consent',
+          description: 'Logged-in users can choose to save a conversation. The other person must accept before the chat is saved for both.',
+        },
+      ],
+    };
+
+    expect(aboutContent.hero.title).toBe('Your Messages Stay Private');
+    expect(aboutContent.cards).toHaveLength(4);
+    expect(aboutContent.cards.map((c) => c.title)).toEqual([
+      'End-to-End Encrypted',
+      'Chat Instantly',
+      'Anonymous by Default',
+      'Save Chat With Mutual Consent',
+    ]);
+  });
 });

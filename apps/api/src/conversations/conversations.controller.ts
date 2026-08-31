@@ -6,7 +6,6 @@ import {
   IApiSuccessResponse,
   IEncryptedMessageEnvelope,
   IUser,
-  toConversationId,
 } from '@campus-stranger/shared-types';
 
 @UseGuards(JwtAuthGuard)
@@ -46,27 +45,17 @@ export class ConversationsController {
   }
 
   /**
-   * Mutually deletes a saved conversation for both participants.
-   * Removes saved_connections and encrypted messages (Option A).
-   * Returns a realtime deletion event via the chat gateway.
+   * Deletes a saved conversation from the authenticated user's saved list.
    */
   @Delete(':id/saved')
   async deleteSavedConversation(
     @Request() req: { user: IUser },
     @Param('id') conversationId: string,
   ): Promise<IApiSuccessResponse<{ deleted: boolean }>> {
-    const result = await this.conversationsService.deleteMutualSavedConnection(
+    const result = await this.conversationsService.deleteSavedConnection(
       req.user.id,
       conversationId,
     );
-
-    if (result.deleted) {
-      await this.chatGateway.notifySaveDeleted(
-        toConversationId(conversationId),
-        req.user.displayName,
-        result.otherUserId,
-      );
-    }
 
     return {
       success: true,

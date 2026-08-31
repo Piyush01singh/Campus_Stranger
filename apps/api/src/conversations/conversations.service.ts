@@ -80,6 +80,19 @@ export class ConversationsService {
   }
 
   /**
+   * Deletes a saved conversation from the authenticated user's own saved list.
+   * Does not destroy the other user's saved connection or conversation history.
+   */
+  async deleteSavedConnection(
+    userId: UserId,
+    conversationId: string,
+  ): Promise<{ deleted: boolean }> {
+    const convId = toConversationId(conversationId);
+    const deleted = await this.db.removeSavedConnection(userId, convId);
+    return { deleted };
+  }
+
+  /**
    * Mutually deletes a saved conversation for both participants.
    * Only a confirmed member may initiate deletion.
    * Returns the other user's ID for realtime notification.

@@ -137,6 +137,26 @@ export class AuthService {
   }
 
   /**
+   * Safe local development & automated testing helper to create or retrieve an authenticated session.
+   */
+  async createTestAuthenticatedUser(
+    displayName?: string,
+    email?: string,
+    googleId?: string,
+  ): Promise<AuthSessionResponse> {
+    const finalGoogleId =
+      googleId || `mock_google_${(displayName || 'user').toLowerCase().replace(/\s+/g, '_')}`;
+    const finalEmail = email || `${finalGoogleId}@campusstranger.local`;
+    const finalDisplayName = displayName || 'Authenticated Student';
+
+    return this.findOrCreateGoogleUser({
+      id: finalGoogleId,
+      email: finalEmail,
+      displayName: finalDisplayName,
+    });
+  }
+
+  /**
    * Decodes and validates optional state parameter from OAuth redirect.
    * Supports raw JWT or base64/base64url JSON { token, conversationId, returnUrl }.
    */
